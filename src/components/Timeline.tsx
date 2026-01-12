@@ -1,0 +1,314 @@
+'use client';
+
+import React, { useMemo, useRef, useEffect, useState } from 'react';
+import { useStore } from '@/store/useStore';
+import { generateTimeline } from '@/utils/auto-editor';
+import { clsx } from 'clsx';
+import { Play, Pause, SkipBack, ZoomIn, ZoomOut } from 'lucide-react';
+
+export default function Timeline() {
+    const { videos, audio, currentTime, setCurrentTime, setStatus, syncSettings } = useStore();
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [zoom, setZoom] = useState(1);
+
+    // Generate timeline data
+    const timelineClips = useMemo(() => {
+        if (!audio || videos.length === 0) return [];
+        return generateTimeline(videos, audio, syncSettings);
+    }, [videos, audio, syncSettings]);
+
+    // --- Audio Playback Logic ---
+    useEffect(() => {
+        if (audio?.file && audioRef.current) {
+            const url = URL.createObjectURL(audio.file);
+            const currentAudio = audioRef.current;
+            currentAudio.src = url;
+            return () => {
+                URL.revokeObjectURL(url);
+                if (currentAudio) currentAudio.src = '';
+            };
+        }
+    }, [audio?.id, audio?.file]);
+
+    useEffect(() => {
+        let animationFrame: number = 0;
+        const currentAudio = audioRef.current;
+
+        const tick = () => {
+            if (currentAudio && isPlaying) {
+                const time = currentAudio.currentTime;
+                // Update store
+                setCurrentTime(time);
+
+                if (time >= (currentAudio.duration || 0) && !currentAudio.paused) {
+                    if (currentAudio.ended) {
+                        setIsPlaying(false);
+                        setStatus('ready');
+                    }
+                }
+                animationFrame = requestAnimationFrame(tick);
+            }
+        };
+
+        if (isPlaying) {
+            currentAudio?.play().catch(e => console.error("Play error", e));
+            tick();
+        } else {
+            currentAudio?.pause();
+            cancelAnimationFrame(animationFrame);
+        }
+
+        return () => cancelAnimationFrame(animationFrame);
+    }, [isPlaying, setCurrentTime, setStatus]);
+
+    // Sync audio if user seeks via store
+    useEffect(() => {
+        if (audioRef.current && Math.abs(audioRef.current.currentTime - currentTime) > 0.1) {
+            audioRef.current.currentTime = currentTime;
+        }
+    }, [currentTime]);
+
+    const togglePlay = () => {
+        setIsPlaying(p => !p);
+        setStatus(!isPlaying ? 'playing' : 'ready');
+    };
+
+    const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.5, 10)); // Max 10x
+    const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.5, 1)); // Min 1x
+
+    // --- Visualization ---
+    useEffect(() => {
+        if (!audio?.buffer || !canvasRef.current || !containerRef.current) return;
+
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const draw = () => {
+            const dpr = window.devicePixelRatio || 1;
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+
+            const buffer = audio.buffer;
+            if (!buffer) return;
+
+            const data = buffer.getChannelData(0);
+            const step = Math.ceil(data.length / width);
+            const amp = height * 0.8;
+
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw Center Line
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.moveTo(0, height / 2);
+            ctx.lineTo(width, height / 2);
+            ctx.stroke();
+
+            // Gradient
+            const gradient = ctx.createLinearGradient(0, 0, 0, height);
+            gradient.addColorStop(0, 'rgba(56, 189, 248, 0.2)');
+            gradient.addColorStop(0.5, 'rgba(56, 189, 248, 0.9)');
+            gradient.addColorStop(1, 'rgba(56, 189, 248, 0.2)');
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+
+            for (let i = 0; i < width; i++) {
+                let min = 1.0;
+                let max = -1.0;
+                for (let j = 0; j < step; j++) {
+                    const datum = data[(i * step) + j];
+                    if (datum < min) min = datum;
+                    if (datum > max) max = datum;
+                }
+                const yMin = (height / 2) + (min * amp * 0.5);
+                const yMax = (height / 2) + (max * amp * 0.5);
+                ctx.fillRect(i, yMin, 1, Math.max(1, yMax - yMin));
+            }
+        };
+
+        draw();
+
+        const observer = new ResizeObserver(draw);
+        if (container) {
+            observer.observe(container);
+        }
+
+        return () => observer.disconnect();
+
+    }, [audio?.buffer, zoom]); // Re-draw on zoom change as container size changes
+
+
+    // Interaction Handlers (Attached to Inner Container)
+    const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (!audio?.duration) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percent = Math.min(Math.max(x / rect.width, 0), 1);
+        setCurrentTime(percent * audio.duration);
+    };
+
+    const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            const delta = e.deltaY * -0.01;
+            setZoom(prev => Math.min(Math.max(prev + delta, 1), 10));
+        }
+    };
+
+    const [isDragging, setIsDragging] = useState(false);
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+        if (isDragging) handleSeek(e);
+    };
+
+    if (!audio) return null;
+
+    const totalDuration = audio.duration || 1;
+
+    return (
+        <div className="flex flex-col h-full bg-[#1e1e1e] rounded-lg border border-[#333] select-none text-[#ccc] font-sans text-xs">
+
+            {/* 1. Header & Controls */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[#333] shrink-0 bg-[#252526]">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={togglePlay}
+                        title={isPlaying ? "Pause" : "Play"}
+                        aria-label={isPlaying ? "Pause" : "Play"}
+                        className="w-8 h-8 rounded-full bg-primary text-black flex items-center justify-center hover:bg-primary/90 transition-all"
+                    >
+                        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                    </button>
+                    <button onClick={() => setCurrentTime(0)} title="Rewind to Start" className="text-[#aaa] hover:text-white transition-colors">
+                        <SkipBack className="w-5 h-5" />
+                    </button>
+
+                    {/* Zoom Controls */}
+                    <div className="flex items-center gap-1 ml-4 border-l border-[#444] pl-4">
+                        <button onClick={handleZoomOut} title="Zoom Out" className="p-1.5 text-[#aaa] hover:text-white hover:bg-[#333] rounded">
+                            <ZoomOut className="w-4 h-4" />
+                        </button>
+                        <span className="w-8 text-center text-[10px] text-[#888]">{Math.round(zoom * 100)}%</span>
+                        <button onClick={handleZoomIn} title="Zoom In" className="p-1.5 text-[#aaa] hover:text-white hover:bg-[#333] rounded">
+                            <ZoomIn className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+                <div className="font-mono text-lg text-blue-400">
+                    {formatTime(currentTime)}
+                </div>
+            </div>
+
+            {/* 2. Scrollable Timeline Area */}
+            <div
+                ref={scrollContainerRef}
+                className="relative flex-1 w-full overflow-x-auto overflow-y-hidden custom-scrollbar bg-[#1e1e1e]"
+                onWheel={handleWheel}
+            >
+                {/* 3. Zoomable Inner Container */}
+                <div
+                    className="relative h-full min-w-full cursor-crosshair group"
+                    style={{ width: `${zoom * 100}%` }}
+                    onMouseDown={(e) => { setIsDragging(true); handleSeek(e); }}
+                    onMouseUp={() => setIsDragging(false)}
+                    onMouseLeave={() => setIsDragging(false)}
+                    onMouseMove={handleMouseMove}
+                >
+                    {/* Time Ruler */}
+                    <div className="h-6 bg-[#252526] border-b border-[#333] flex items-end pb-1 px-2 text-[10px] text-[#888] font-mono pointer-events-none sticky top-0 z-20">
+                        <div className="flex justify-between w-full">
+                            <span>00:00</span>
+                            {/* Intermediate markers could be added here based on zoom */}
+                            <span>{formatTime(totalDuration / 2)}</span>
+                            <span>{formatTime(totalDuration)}</span>
+                        </div>
+                    </div>
+
+                    {/* Content Area */}
+                    <div className="relative h-[calc(100%-24px)] w-full">
+
+                        {/* A. Video Tracks Area */}
+                        <div className="absolute top-2 left-0 right-0 h-[80px]">
+                            <div className="relative w-full h-full">
+                                {timelineClips.map((clip, idx) => (
+                                    <div
+                                        key={clip.id}
+                                        className={clsx(
+                                            "absolute top-0 bottom-0 border border-black/20 overflow-hidden flex items-center px-2",
+                                            "shadow-sm transition-opacity hover:opacity-90",
+                                            // Specific Premiere-like colors
+                                            idx % 3 === 0 ? "bg-[#6d9eeb]" :     // Blue
+                                                idx % 3 === 1 ? "bg-[#e06666]" :     // Red/Pink
+                                                    "bg-[#ffd966]"                       // Yellow
+                                        )}
+                                        style={{
+                                            left: `${(clip.timelineStart / totalDuration) * 100}%`,
+                                            width: `${(clip.duration / totalDuration) * 100}%`
+                                        }}
+                                    >
+                                        <div className="text-black font-bold text-sm truncate leading-tight">
+                                            V{clip.videoIndex}
+                                        </div>
+                                        <span className="absolute bottom-1 right-1 text-[9px] text-black/60 font-mono font-bold">
+                                            {clip.duration.toFixed(1)}s
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* B. Audio Track Area */}
+                        <div className="absolute top-[90px] left-0 right-0 h-[60px] bg-[#2d3a40] border-t border-b border-[#3a4b53]">
+                            <div ref={containerRef} className="w-full h-full opacity-80">
+                                <canvas ref={canvasRef} className="w-full h-full" />
+                            </div>
+                            <div className="absolute top-1 left-2 text-[10px] text-[#4db8ff] font-medium bg-black/40 px-1 rounded">
+                                Audio Track 1
+                            </div>
+                        </div>
+
+                        {/* C. Beat Markers (Full Height Overlay) */}
+                        {audio.beats && audio.beats.map((beat, i) => (
+                            <div
+                                key={i}
+                                className="absolute top-0 bottom-0 w-[1px] bg-[#ffffff40] pointer-events-none z-10"
+                                style={{ left: `${(beat / totalDuration) * 100}%` }}
+                            />
+                        ))}
+
+                        {/* D. Playhead (Premiere Style) */}
+                        <div
+                            className="absolute top-[-24px] bottom-0 w-[1px] bg-[#3399ff] z-50 pointer-events-none"
+                            style={{ left: `${(currentTime / totalDuration) * 100}%` }}
+                        >
+                            {/* Blue Handle Head */}
+                            <div className="absolute top-0 -left-[6px] w-[13px] h-[16px] bg-[#3399ff] clip-path-playhead shadow-sm" style={{ clipPath: 'polygon(0% 0%, 100% 0%, 100% 70%, 50% 100%, 0% 70%)' }} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
+        </div>
+    );
+}
+
+function formatTime(seconds: number) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 10);
+    return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
+}
