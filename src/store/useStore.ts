@@ -15,17 +15,21 @@ export interface AudioTrack {
   duration: number;
   buffer: AudioBuffer | null;
   beats: number[]; // Array of timestamps in seconds
+  bpm?: number; // Detected tempo
   detectedWithAlgorithm?: BeatAlgorithm;
 }
 
-export type BeatAlgorithm = 'energy' | 'spectral' | 'ai' | 'drums' | 'vocals' | 'voice' | 'brass' | 'keys';
+export type BeatAlgorithm = 'energy' | 'spectral' | 'ai' | 'drums' | 'bass' | 'guitar' | 'vocals' | 'voice' | 'words' | 'sentences' | 'melody' | 'brass' | 'keys' | 'silence' | 'downbeat' | 'phrase' | 'intensity' | 'harmonic' | 'combo-edm' | 'combo-clip';
 
 export interface SyncSettings {
   minDuration: number;
   maxDuration: number;
   algorithm: BeatAlgorithm;
-  videoMode: 'sequential-once' | 'random-loop';
+  videoMode: 'sequential-once' | 'random-loop' | 'beat-locked';
   cropMode: 'random' | 'smart';
+  beatSensitivity: number; // Min interval between beats in ms (debounce)
+  durationVariance: number; // 0-100% random variance in clip duration
+  skipEveryN: number; // Cut on every Nth beat (1 = every beat, 2 = every 2nd, etc.)
 }
 
 interface AppState {
@@ -39,7 +43,7 @@ interface AppState {
   // Actions
   addVideos: (videos: VideoClip[]) => void;
   setAudio: (audio: AudioTrack) => void;
-  setBeats: (beats: number[], algorithm: BeatAlgorithm) => void;
+  setBeats: (beats: number[], algorithm: BeatAlgorithm, bpm?: number) => void;
   setAudioBuffer: (buffer: AudioBuffer) => void;
   setStatus: (status: AppState['status']) => void;
   setStage: (stage: AppState['currentStage']) => void;
@@ -56,7 +60,7 @@ export const useStore = create<AppState>((set) => ({
   audio: null,
   status: 'idle',
   currentStage: 'upload',
-  syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'random-loop', cropMode: 'smart' },
+  syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'beat-locked', cropMode: 'smart', beatSensitivity: 100, durationVariance: 0, skipEveryN: 1 },
   currentTime: 0,
 
   addVideos: (newVideos) => set((state) => ({
@@ -65,8 +69,8 @@ export const useStore = create<AppState>((set) => ({
 
   setAudio: (audio) => set({ audio }),
 
-  setBeats: (beats, algorithm) => set((state) => ({
-    audio: state.audio ? { ...state.audio, beats, detectedWithAlgorithm: algorithm } : null
+  setBeats: (beats, algorithm, bpm) => set((state) => ({
+    audio: state.audio ? { ...state.audio, beats, bpm, detectedWithAlgorithm: algorithm } : null
   })),
 
   setAudioBuffer: (buffer) => set((state) => ({
@@ -101,7 +105,7 @@ export const useStore = create<AppState>((set) => ({
     audio: null,
     status: 'idle',
     currentStage: 'upload',
-    syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'random-loop', cropMode: 'smart' },
+    syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'beat-locked', cropMode: 'smart', beatSensitivity: 100, durationVariance: 0, skipEveryN: 1 },
     currentTime: 0
   }),
 }));

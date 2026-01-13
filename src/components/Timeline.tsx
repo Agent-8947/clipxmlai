@@ -15,6 +15,7 @@ export default function Timeline() {
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [zoom, setZoom] = useState(1);
+    const [showGrid, setShowGrid] = useState(true);
 
     // Generate timeline data
     const timelineClips = useMemo(() => {
@@ -206,6 +207,15 @@ export default function Timeline() {
                             <ZoomIn className="w-4 h-4" />
                         </button>
                     </div>
+
+                    {/* Grid Toggle */}
+                    <button
+                        onClick={() => setShowGrid(prev => !prev)}
+                        title={showGrid ? "Hide Beat Grid" : "Show Beat Grid"}
+                        className={`ml-2 px-2 py-1 text-[10px] rounded border transition-all ${showGrid ? 'bg-primary/20 border-primary text-primary' : 'bg-transparent border-[#444] text-[#666]'}`}
+                    >
+                        Grid {showGrid ? 'ON' : 'OFF'}
+                    </button>
                 </div>
                 <div className="font-mono text-lg text-blue-400">
                     {formatTime(currentTime)}
@@ -281,7 +291,7 @@ export default function Timeline() {
                         </div>
 
                         {/* C. Beat Markers (Full Height Overlay) */}
-                        {audio.beats && audio.beats.map((beat, i) => (
+                        {showGrid && audio.beats && audio.beats.map((beat, i) => (
                             <div
                                 key={i}
                                 className="absolute top-0 bottom-0 w-[1px] bg-[#ffffff40] pointer-events-none z-10"

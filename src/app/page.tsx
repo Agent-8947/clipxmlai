@@ -286,21 +286,164 @@ export default function Home() {
 
                   {/* Algorithm Selector */}
                   <div className="mt-4 space-y-2">
-                    <label className="text-xs text-muted uppercase tracking-wider font-semibold">Analysis Algorithm</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-muted uppercase tracking-wider font-semibold">Analysis Algorithm</label>
+                      {audio?.bpm && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-primary font-mono font-bold">{audio.bpm} BPM</span>
+                          <span className="text-xs text-muted">•</span>
+                          <span className="text-xs text-muted">{audio.beats?.length || 0} beats</span>
+                        </div>
+                      )}
+                    </div>
                     <select
                       value={syncSettings.algorithm}
                       title="Music Analysis Algorithm"
                       onChange={(e) => setSyncSettings({ algorithm: e.target.value as BeatAlgorithm })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
-                      <option value="energy">⚡ Energy Based (Standard)</option>
-                      <option value="drums">🥁 Drums (Kick/Snare)</option>
-                      <option value="vocals">🎤 Vocals (Singing)</option>
-                      <option value="voice">🗣️ Voice (Speech)</option>
-                      <option value="brass">🎺 Brass (Horns)</option>
-                      <option value="keys">🎹 Keys (Piano/Synth)</option>
-                      <option value="spectral">🌊 Frequency (spectral)</option>
-                      <option value="ai">🧠 AI Model (Legacy)</option>
+                      <optgroup label="🎯 General">
+                        <option value="energy">⚡ Energy Based (Standard)</option>
+                        <option value="spectral">🌊 Frequency (spectral)</option>
+                      </optgroup>
+                      <optgroup label="🎛️ Instruments">
+                        <option value="drums">🥁 Drums (Kick/Snare)</option>
+                        <option value="bass">🎸 Bass (Low Freq)</option>
+                        <option value="guitar">🎸 Guitar (Mid Freq)</option>
+                        <option value="brass">🎺 Brass (Horns)</option>
+                        <option value="keys">🎹 Keys (Piano/Synth)</option>
+                      </optgroup>
+                      <optgroup label="🎤 Voice">
+                        <option value="vocals">🎤 Vocals (Singing)</option>
+                        <option value="voice">🗣️ Voice (Speech)</option>
+                        <option value="words">💬 Words (По словам)</option>
+                        <option value="sentences">📝 Sentences (По предложениям)</option>
+                      </optgroup>
+                      <optgroup label="🎼 Structure">
+                        <option value="melody">🎵 Melody (Мелодия)</option>
+                        <option value="silence">🔇 Silence (Паузы)</option>
+                        <option value="downbeat">1️⃣ Downbeat (Первый бит)</option>
+                        <option value="phrase">🎼 Phrase (Фразы 4-8 тактов)</option>
+                        <option value="intensity">📈 Intensity (Build-up/Drop)</option>
+                        <option value="harmonic">🎹 Harmonic (Смена аккордов)</option>
+                      </optgroup>
+                      <optgroup label="🔥 Combo">
+                        <option value="combo-edm">🔥 EDM (Drums+Bass)</option>
+                        <option value="combo-clip">🎬 Music Video (Vocals+Drums)</option>
+                      </optgroup>
+                      <optgroup label="🧪 Experimental">
+                        <option value="ai">🧠 AI Model (Legacy)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Beat Sensitivity (Debounce) */}
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={(syncSettings.beatSensitivity || 0) > 0}
+                          onChange={(e) => setSyncSettings({ beatSensitivity: e.target.checked ? 100 : 0 })}
+                          className="w-4 h-4 accent-primary cursor-pointer"
+                        />
+                        <span className="text-xs text-muted uppercase tracking-wider font-semibold">Beat Sensitivity</span>
+                      </label>
+                      <span className="text-xs text-primary font-mono">
+                        {(syncSettings.beatSensitivity || 0) === 0
+                          ? 'OFF'
+                          : syncSettings.beatSensitivity >= 1000
+                            ? `${(syncSettings.beatSensitivity / 1000).toFixed(1)}s`
+                            : `${syncSettings.beatSensitivity}ms`}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="2000"
+                      step="50"
+                      value={syncSettings.beatSensitivity || 100}
+                      onChange={(e) => setSyncSettings({ beatSensitivity: parseInt(e.target.value) })}
+                      disabled={(syncSettings.beatSensitivity || 0) === 0}
+                      className={`w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary ${(syncSettings.beatSensitivity || 0) === 0 ? 'opacity-30' : ''}`}
+                      title="Минимальный интервал между битами (меньше = больше битов)"
+                    />
+                    <div className="flex justify-between text-[10px] text-muted">
+                      <span>50ms (очень часто)</span>
+                      <span>2s (редко)</span>
+                    </div>
+                  </div>
+
+                  {/* Skip Every N */}
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-muted uppercase tracking-wider font-semibold">Skip Beats</label>
+                      <span className="text-xs text-primary font-mono">каждый {syncSettings.skipEveryN || 1}-й</span>
+                    </div>
+                    <select
+                      value={syncSettings.skipEveryN || 1}
+                      onChange={(e) => setSyncSettings({ skipEveryN: parseInt(e.target.value) })}
+                      className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
+                    >
+                      <option value={1}>Каждый бит</option>
+                      <option value={2}>Каждый 2-й бит</option>
+                      <option value={3}>Каждый 3-й бит</option>
+                      <option value={4}>Каждый 4-й бит (1 на такт)</option>
+                      <option value={8}>Каждый 8-й бит (редко)</option>
+                    </select>
+                  </div>
+
+                  {/* Duration Variance */}
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-muted uppercase tracking-wider font-semibold">Duration Variance</label>
+                      <span className="text-xs text-primary font-mono">{syncSettings.durationVariance || 0}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="50"
+                      step="5"
+                      value={syncSettings.durationVariance || 0}
+                      onChange={(e) => setSyncSettings({ durationVariance: parseInt(e.target.value) })}
+                      className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary"
+                      title="Случайная вариация длительности клипов"
+                    />
+                    <div className="flex justify-between text-[10px] text-muted">
+                      <span>0% (точно)</span>
+                      <span>50% (разнообразно)</span>
+                    </div>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="mt-4 space-y-2">
+                    <label className="text-xs text-muted uppercase tracking-wider font-semibold">Quick Preset</label>
+                    <select
+                      onChange={(e) => {
+                        const preset = e.target.value;
+                        if (preset === 'fast-cuts') {
+                          setSyncSettings({ algorithm: 'drums', beatSensitivity: 100, skipEveryN: 1, durationVariance: 10 });
+                        } else if (preset === 'chill') {
+                          setSyncSettings({ algorithm: 'phrase', beatSensitivity: 1000, skipEveryN: 4, durationVariance: 20 });
+                        } else if (preset === 'music-video') {
+                          setSyncSettings({ algorithm: 'combo-clip', beatSensitivity: 200, skipEveryN: 2, durationVariance: 15 });
+                        } else if (preset === 'edm-drop') {
+                          setSyncSettings({ algorithm: 'intensity', beatSensitivity: 500, skipEveryN: 1, durationVariance: 0 });
+                        } else if (preset === 'melodic') {
+                          setSyncSettings({ algorithm: 'harmonic', beatSensitivity: 800, skipEveryN: 4, durationVariance: 25 });
+                        } else if (preset === 'speech') {
+                          setSyncSettings({ algorithm: 'sentences', beatSensitivity: 500, skipEveryN: 1, durationVariance: 10 });
+                        }
+                      }}
+                      className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
+                    >
+                      <option value="">— Выбрать пресет —</option>
+                      <option value="fast-cuts">⚡ Fast Cuts (быстрые склейки)</option>
+                      <option value="chill">🌊 Chill (спокойный)</option>
+                      <option value="music-video">🎬 Music Video (клип)</option>
+                      <option value="edm-drop">🔥 EDM Drop (дропы)</option>
+                      <option value="melodic">🎵 Melodic (мелодичный)</option>
+                      <option value="speech">🎤 Speech (речь/подкаст)</option>
                     </select>
                   </div>
 
@@ -322,15 +465,17 @@ export default function Home() {
                   <div className="mt-4 space-y-2">
                     <label className="text-xs text-muted uppercase tracking-wider font-semibold">Video Arrangement</label>
                     <select
-                      value={syncSettings.videoMode || 'random-loop'}
+                      value={syncSettings.videoMode || 'beat-locked'}
                       title="Video Clip Arrangement Mode"
-                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as 'sequential-once' | 'random-loop' })}
+                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as 'sequential-once' | 'random-loop' | 'beat-locked' })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
+                      <option value="beat-locked">🎯 Beat-Locked (Точно по битам)</option>
                       <option value="random-loop">🔀 Random Loop (Fill Track)</option>
                       <option value="sequential-once">1️⃣ Sequential (One Pass)</option>
                     </select>
                   </div>
+
 
                   <div className="mt-4 flex justify-end">
                     <button

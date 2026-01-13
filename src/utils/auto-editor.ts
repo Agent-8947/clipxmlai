@@ -18,7 +18,7 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
     if (videos.length === 0 || !audio) return [];
 
     const timeline: TimelineClip[] = [];
-    const beats = audio.beats;
+    const beats = audio.beats || [];
     const totalDuration = audio.duration || 1;
 
     // Map videos to their storyboard index (1-based) for easy lookup
@@ -27,7 +27,92 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
     // Parameters from Settings
     const MIN_CLIP_DURATION = settings.minDuration; // e.g. 0.5
     const MAX_CLIP_DURATION = settings.maxDuration; // e.g. 4.0
+    const skipEveryN = settings.skipEveryN || 1; // Use every Nth beat
+    const durationVariance = (settings.durationVariance || 0) / 100; // 0-0.5
 
+    // ========== BEAT-LOCKED MODE ==========
+    // Every clip starts and ends exactly on a beat. EVERY beat = new clip!
+    if (settings.videoMode === 'beat-locked' && beats.length > 0) {
+        // Filter beats based on skipEveryN
+        let filteredBeats = beats;
+        if (skipEveryN > 1) {
+            filteredBeats = beats.filter((_, i) => i % skipEveryN === 0);
+        }
+
+        // Use filtered beats as cut points
+        const cutPoints: number[] = [0]; // Start from 0
+
+        for (let i = 0; i < filteredBeats.length; i++) {
+            const beat = filteredBeats[i];
+            // Add every beat that's within the audio duration and after the last cut
+            if (beat > cutPoints[cutPoints.length - 1] && beat <= totalDuration) {
+                cutPoints.push(beat);
+            }
+        }
+
+        // Ensure we end at total duration
+        if (cutPoints[cutPoints.length - 1] < totalDuration) {
+            cutPoints.push(totalDuration);
+        }
+
+        // Create clips between consecutive cut points
+        let videoIdx = 0;
+        for (let i = 0; i < cutPoints.length - 1; i++) {
+            const clipStart = cutPoints[i];
+            const clipEnd = cutPoints[i + 1];
+            let clipDuration = clipEnd - clipStart;
+
+            // Apply duration variance (randomize clip duration slightly)
+            if (durationVariance > 0 && clipDuration > 0.1) {
+                const varianceAmount = clipDuration * durationVariance;
+                const randomFactor = (Math.random() - 0.5) * 2; // -1 to 1
+                clipDuration = clipDuration + (varianceAmount * randomFactor);
+                clipDuration = Math.max(0.1, clipDuration); // Ensure minimum duration
+            }
+
+            if (clipDuration < 0.05) continue; // Skip only extremely tiny gaps (< 50ms)
+
+            // Cycle through videos
+            const selectedVideo = videos[videoIdx % videos.length];
+            videoIdx++;
+
+            // Select source segment
+            let sourceStart = 0;
+            if (selectedVideo.duration > clipDuration) {
+                if (settings.cropMode === 'smart') {
+                    const margin = selectedVideo.duration * 0.05;
+                    const usableDuration = selectedVideo.duration - (margin * 2);
+                    if (usableDuration > clipDuration) {
+                        const rand = (Math.random() + Math.random() + Math.random()) / 3;
+                        const maxPossibleStart = usableDuration - clipDuration;
+                        sourceStart = margin + (rand * maxPossibleStart);
+                    }
+                } else {
+                    const maxStart = selectedVideo.duration - clipDuration;
+                    sourceStart = Math.random() * maxStart;
+                }
+            }
+
+            timeline.push({
+                id: crypto.randomUUID(),
+                videoId: selectedVideo.id,
+                videoIndex: videoToIndexMap.get(selectedVideo.id) || 0,
+                videoName: selectedVideo.name,
+                file: selectedVideo.file,
+                videoPath: `file://${selectedVideo.name}`,
+                duration: clipDuration,
+                timelineStart: clipStart,
+                timelineEnd: clipEnd,
+                sourceStart: sourceStart,
+                sourceEnd: sourceStart + clipDuration
+            });
+        }
+
+        return timeline;
+    }
+
+
+    // ========== LEGACY MODES (sequential-once, random-loop) ==========
     let currentTime = 0;
     let nextVideoIdx = 0; // for sequential mode
 
@@ -149,3 +234,4 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
 
     return timeline;
 }
+
