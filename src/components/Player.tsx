@@ -12,12 +12,12 @@ function formatTime(seconds: number) {
 }
 
 export default function Player() {
-    const { videos, audio, currentTime, setCurrentTime, setStatus, syncSettings } = useStore();
+    const { videos, audio, currentTime, setCurrentTime, setStatus, syncSettings, isPlaying, setIsPlaying } = useStore();
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
 
-    const [isPlaying, setIsPlaying] = useState(false);
+
 
     // Memoize timeline logic
     const timeline = useMemo(() => audio ? generateTimeline(videos, audio, syncSettings) : [], [videos, audio, syncSettings]);
@@ -26,31 +26,31 @@ export default function Player() {
     const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        const urls: Record<string, string> = {};
+        const newUrls: Record<string, string> = { ...videoUrls };
+        let changed = false;
         videos.forEach(v => {
-            if (!videoUrls[v.id]) {
-                urls[v.id] = URL.createObjectURL(v.file);
-            } else {
-                urls[v.id] = videoUrls[v.id];
+            if (!newUrls[v.id]) {
+                newUrls[v.id] = URL.createObjectURL(v.file);
+                changed = true;
             }
         });
-        setVideoUrls(urls);
 
-        // Cleanup is tricky if we reuse, but for component unmount:
-        return () => {
-            // Only revoke if we are sure? Let's just revoke all on unmount
-            // Object.values(urls).forEach(u => URL.revokeObjectURL(u));
-        };
+        if (changed) {
+            setVideoUrls(newUrls);
+        }
+
+        // Potential cleanup if needed:
+        // return () => Object.values(newUrls).forEach(URL.revokeObjectURL);
     }, [videos]);
 
     // Audio Source setup
     useEffect(() => {
-        if (audio && audioRef.current) {
+        if (audio?.file && audioRef.current) {
             const url = URL.createObjectURL(audio.file);
             audioRef.current.src = url;
             return () => URL.revokeObjectURL(url);
         }
-    }, [audio]);
+    }, [audio?.id, audio?.file]);
 
     // Sync Loop (RAF)
     useEffect(() => {
@@ -68,7 +68,6 @@ export default function Player() {
                 if (time >= (audioRef.current.duration || 0) && !audioRef.current.paused) {
                     if (audioRef.current.ended) {
                         setIsPlaying(false);
-                        setStatus('ready');
                     }
                 }
             }
@@ -84,7 +83,7 @@ export default function Player() {
         }
 
         return () => cancelAnimationFrame(animationFrame);
-    }, [isPlaying, setCurrentTime, setStatus]);
+    }, [isPlaying, setCurrentTime]);
 
     // Video Sync Logic
     useEffect(() => {
@@ -136,8 +135,7 @@ export default function Player() {
     }, [currentTime]);
 
     const togglePlay = () => {
-        setIsPlaying(p => !p);
-        setStatus(!isPlaying ? 'playing' : 'ready');
+        setIsPlaying(!isPlaying);
     };
 
     if (!audio) return null;

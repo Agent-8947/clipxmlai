@@ -7,15 +7,15 @@ import { clsx } from 'clsx';
 import { Play, Pause, SkipBack, ZoomIn, ZoomOut } from 'lucide-react';
 
 export default function Timeline() {
-    const { videos, audio, currentTime, setCurrentTime, setStatus, syncSettings } = useStore();
+    const { videos, audio, currentTime, setCurrentTime, syncSettings, isPlaying, setIsPlaying } = useStore();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-    const [isPlaying, setIsPlaying] = useState(false);
+
     const [zoom, setZoom] = useState(1);
-    const [showGrid, setShowGrid] = useState(true);
+    const [showGrid, setShowGrid] = useState(false);
 
     // Generate timeline data
     const timelineClips = useMemo(() => {
@@ -23,60 +23,94 @@ export default function Timeline() {
         return generateTimeline(videos, audio, syncSettings);
     }, [videos, audio, syncSettings]);
 
-    // --- Audio Playback Logic ---
+
+
+    // --- Audio Playback & Sync ---
+
+    // Force re-render of audio element when file changes to ensure clean state
+    const audioKey = audio?.id || 'no-audio';
+
+    // Effect: Handle Play/Pause
     useEffect(() => {
-        if (audio?.file && audioRef.current) {
+        const el = audioRef.current;
+        if (!el) return;
+
+        if (isPlaying) {
+            const playPromise = el.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.warn("Playback prevented:", error);
+                    // Do not reset isPlaying here to avoid UI flicker, let user try again
+                });
+            }
+        } else {
+            el.pause();
+        }
+    }, [isPlaying, audioKey]);
+
+
+
+    const handleAudioEnded = () => {
+        setIsPlaying(false);
+    };
+
+    // Reset state when audio file changes
+    useEffect(() => {
+        if (audio?.id) {
+            setCurrentTime(0);
+            setIsPlaying(false);
+        }
+    }, [audio?.id, setCurrentTime, setIsPlaying]);
+
+    // Initialize audio source when mounting (controlled by key)
+    useEffect(() => {
+        const el = audioRef.current;
+        if (el && audio?.file) {
             const url = URL.createObjectURL(audio.file);
-            const currentAudio = audioRef.current;
-            currentAudio.src = url;
+            el.src = url;
+            el.load();
             return () => {
                 URL.revokeObjectURL(url);
-                if (currentAudio) currentAudio.src = '';
             };
         }
-    }, [audio?.id, audio?.file]);
+    }, [audio?.file]);
 
     useEffect(() => {
-        let animationFrame: number = 0;
-        const currentAudio = audioRef.current;
+        if (!isPlaying || !audioRef.current) return;
 
+        let frameId: number;
         const tick = () => {
-            if (currentAudio && isPlaying) {
-                const time = currentAudio.currentTime;
-                // Update store
-                setCurrentTime(time);
-
-                if (time >= (currentAudio.duration || 0) && !currentAudio.paused) {
-                    if (currentAudio.ended) {
-                        setIsPlaying(false);
-                        setStatus('ready');
-                    }
+            if (audioRef.current) {
+                setCurrentTime(audioRef.current.currentTime);
+                if (audioRef.current.ended) {
+                    setIsPlaying(false);
+                } else {
+                    frameId = requestAnimationFrame(tick);
                 }
-                animationFrame = requestAnimationFrame(tick);
             }
         };
 
-        if (isPlaying) {
-            currentAudio?.play().catch(e => console.error("Play error", e));
-            tick();
-        } else {
-            currentAudio?.pause();
-            cancelAnimationFrame(animationFrame);
-        }
-
-        return () => cancelAnimationFrame(animationFrame);
-    }, [isPlaying, setCurrentTime, setStatus]);
+        frameId = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frameId);
+    }, [isPlaying, setCurrentTime, setIsPlaying]);
 
     // Sync audio if user seeks via store
     useEffect(() => {
-        if (audioRef.current && Math.abs(audioRef.current.currentTime - currentTime) > 0.1) {
-            audioRef.current.currentTime = currentTime;
+        const el = audioRef.current;
+        if (!el) return;
+
+        const diff = Math.abs(el.currentTime - currentTime);
+        // If playing, allow tolerance to avoid fighting with RAF updates
+        // If paused, tight tolerance for scrubbing
+        const tolerance = isPlaying ? 0.2 : 0.05;
+
+        if (diff > tolerance) {
+            el.currentTime = currentTime;
         }
-    }, [currentTime]);
+    }, [currentTime, isPlaying]);
 
     const togglePlay = () => {
-        setIsPlaying(p => !p);
-        setStatus(!isPlaying ? 'playing' : 'ready');
+        setIsPlaying(!isPlaying);
     };
 
     const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.5, 10)); // Max 10x
@@ -311,7 +345,12 @@ export default function Timeline() {
                 </div>
             </div>
 
-            <audio ref={audioRef} onEnded={() => setIsPlaying(false)} />
+            <audio
+                key={audioKey}
+                ref={audioRef}
+                preload="auto"
+                onEnded={handleAudioEnded}
+            />
         </div>
     );
 }

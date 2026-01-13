@@ -2,7 +2,6 @@
 
 import Dropzone from '@/components/Dropzone';
 import Storyboard from '@/components/Storyboard';
-
 import Timeline from '@/components/Timeline';
 import {
   useStore,
@@ -382,6 +381,7 @@ export default function Home() {
                     </div>
                     <select
                       value={syncSettings.skipEveryN || 1}
+                      title="Skip Beats Interval"
                       onChange={(e) => setSyncSettings({ skipEveryN: parseInt(e.target.value) })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
@@ -433,8 +433,11 @@ export default function Home() {
                           setSyncSettings({ algorithm: 'harmonic', beatSensitivity: 800, skipEveryN: 4, durationVariance: 25 });
                         } else if (preset === 'speech') {
                           setSyncSettings({ algorithm: 'sentences', beatSensitivity: 500, skipEveryN: 1, durationVariance: 10 });
+                        } else if (preset === 'metronome') {
+                          setSyncSettings({ videoMode: 'metronome', skipEveryN: 1, durationVariance: 0 });
                         }
                       }}
+                      title="Quick Presets Selection"
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
                       <option value="">— Выбрать пресет —</option>
@@ -444,6 +447,7 @@ export default function Home() {
                       <option value="edm-drop">🔥 EDM Drop (дропы)</option>
                       <option value="melodic">🎵 Melodic (мелодичный)</option>
                       <option value="speech">🎤 Speech (речь/подкаст)</option>
+                      <option value="metronome">⏲️ Metronome (сетка BPM)</option>
                     </select>
                   </div>
 
@@ -467,10 +471,11 @@ export default function Home() {
                     <select
                       value={syncSettings.videoMode || 'beat-locked'}
                       title="Video Clip Arrangement Mode"
-                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as 'sequential-once' | 'random-loop' | 'beat-locked' })}
+                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as any })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
                       <option value="beat-locked">🎯 Beat-Locked (Точно по битам)</option>
+                      <option value="metronome">⏲️ Metronome (По сетке BPM)</option>
                       <option value="random-loop">🔀 Random Loop (Fill Track)</option>
                       <option value="sequential-once">1️⃣ Sequential (One Pass)</option>
                     </select>
@@ -499,8 +504,8 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Right: Timeline (Replaces Player) */}
-              <div className="lg:col-span-12 xl:col-span-8 flex flex-col gap-6 h-full min-h-0">
+              {/* Right: Timeline Only */}
+              <div className="lg:col-span-12 xl:col-span-8 flex flex-col gap-6 h-full min-h-0 overflow-y-auto pr-2">
                 <Timeline />
               </div>
             </div>

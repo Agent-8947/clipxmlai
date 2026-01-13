@@ -30,45 +30,102 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
     const skipEveryN = settings.skipEveryN || 1; // Use every Nth beat
     const durationVariance = (settings.durationVariance || 0) / 100; // 0-0.5
 
-    // ========== BEAT-LOCKED MODE ==========
-    // Every clip starts and ends exactly on a beat. EVERY beat = new clip!
+    // ========== SELECT CUT POINTS BASED ON MODE ==========
+    let cutPoints: number[] = [];
+
     if (settings.videoMode === 'beat-locked' && beats.length > 0) {
-        // Filter beats based on skipEveryN
-        let filteredBeats = beats;
-        if (skipEveryN > 1) {
-            filteredBeats = beats.filter((_, i) => i % skipEveryN === 0);
-        }
+        // Mode 1: Beat-locked
+        // Instead of strict filtering, we step through beats using skipEveryN + variance
+        const cutPointsList: number[] = [0];
 
-        // Use filtered beats as cut points
-        const cutPoints: number[] = [0]; // Start from 0
+        let currentBeatIndex = 0;
 
-        for (let i = 0; i < filteredBeats.length; i++) {
-            const beat = filteredBeats[i];
-            // Add every beat that's within the audio duration and after the last cut
-            if (beat > cutPoints[cutPoints.length - 1] && beat <= totalDuration) {
-                cutPoints.push(beat);
+        // Find the first beat that is > 0 to start indexing correctly
+        // (Usually beats[0] is near 0, but we want to start counting intervals from there)
+
+        while (currentBeatIndex < beats.length) {
+            let step = skipEveryN;
+
+            // Apply variance to the STEP amount (rhythm variance)
+            if (durationVariance > 0) {
+                const maxVar = Math.floor(step * durationVariance * 2); // Increased effect range
+                if (maxVar > 0) {
+                    const delta = Math.floor(Math.random() * (maxVar * 2 + 1)) - maxVar;
+                    step += delta;
+                }
+                step = Math.max(1, step); // At least 1 beat
+            }
+
+            currentBeatIndex += step;
+
+            if (currentBeatIndex < beats.length) {
+                const beatTime = beats[currentBeatIndex];
+                // Validate beat
+                if (beatTime > cutPointsList[cutPointsList.length - 1] && beatTime <= totalDuration) {
+                    cutPointsList.push(beatTime);
+                }
+            } else {
+                break;
             }
         }
+
+        cutPoints = cutPointsList;
 
         // Ensure we end at total duration
         if (cutPoints[cutPoints.length - 1] < totalDuration) {
             cutPoints.push(totalDuration);
         }
 
+    } else if (settings.videoMode === 'metronome' && (audio.bpm || beats.length > 0)) {
+        // Mode 2: Metronome - steady grid based on BPM
+        const bpm = audio.bpm || 120;
+        const beatInterval = 60 / bpm;
+        const baseInterval = beatInterval * skipEveryN;
+
+        cutPoints = [0];
+        let currentPoint = 0;
+
+        // Find start point
+        if (beats.length > 0 && beats[0] < 0.5) {
+            currentPoint = beats[0]; // Align to first beat if close
+            if (currentPoint > 0.05) cutPoints.push(currentPoint);
+        }
+
+        while (currentPoint < totalDuration) {
+            let interval = baseInterval;
+
+            // Apply variance to interval
+            if (durationVariance > 0) {
+                const varianceAmount = baseInterval * durationVariance;
+                const randomFactor = (Math.random() - 0.5) * 2;
+                interval += (varianceAmount * randomFactor);
+                interval = Math.max(0.1, interval);
+            }
+
+            const nextPoint = currentPoint + interval;
+
+            if (nextPoint > totalDuration) break;
+
+            if (nextPoint > cutPoints[cutPoints.length - 1] + 0.05) {
+                cutPoints.push(nextPoint);
+            }
+            currentPoint = nextPoint;
+        }
+
+        if (cutPoints[cutPoints.length - 1] < totalDuration) {
+            cutPoints.push(totalDuration);
+        }
+    }
+
+    // Common Clip Generation for beat-based modes
+    if (cutPoints.length > 0) {
+
         // Create clips between consecutive cut points
         let videoIdx = 0;
         for (let i = 0; i < cutPoints.length - 1; i++) {
             const clipStart = cutPoints[i];
             const clipEnd = cutPoints[i + 1];
-            let clipDuration = clipEnd - clipStart;
-
-            // Apply duration variance (randomize clip duration slightly)
-            if (durationVariance > 0 && clipDuration > 0.1) {
-                const varianceAmount = clipDuration * durationVariance;
-                const randomFactor = (Math.random() - 0.5) * 2; // -1 to 1
-                clipDuration = clipDuration + (varianceAmount * randomFactor);
-                clipDuration = Math.max(0.1, clipDuration); // Ensure minimum duration
-            }
+            const clipDuration = clipEnd - clipStart;
 
             if (clipDuration < 0.05) continue; // Skip only extremely tiny gaps (< 50ms)
 

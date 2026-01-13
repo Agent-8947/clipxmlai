@@ -25,7 +25,7 @@ export interface SyncSettings {
   minDuration: number;
   maxDuration: number;
   algorithm: BeatAlgorithm;
-  videoMode: 'sequential-once' | 'random-loop' | 'beat-locked';
+  videoMode: 'sequential-once' | 'random-loop' | 'beat-locked' | 'metronome';
   cropMode: 'random' | 'smart';
   beatSensitivity: number; // Min interval between beats in ms (debounce)
   durationVariance: number; // 0-100% random variance in clip duration
@@ -39,6 +39,7 @@ interface AppState {
   currentStage: 'upload' | 'editor' | 'export';
   syncSettings: SyncSettings;
   currentTime: number;
+  isPlaying: boolean;
 
   // Actions
   addVideos: (videos: VideoClip[]) => void;
@@ -49,6 +50,7 @@ interface AppState {
   setStage: (stage: AppState['currentStage']) => void;
   setSyncSettings: (settings: Partial<SyncSettings>) => void;
   setCurrentTime: (time: number) => void;
+  setIsPlaying: (playing: boolean) => void;
   reorderVideos: (startIndex: number, endIndex: number) => void;
   removeVideo: (id: string) => void;
   removeAudio: () => void;
@@ -62,6 +64,7 @@ export const useStore = create<AppState>((set) => ({
   currentStage: 'upload',
   syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'beat-locked', cropMode: 'smart', beatSensitivity: 100, durationVariance: 0, skipEveryN: 1 },
   currentTime: 0,
+  isPlaying: false,
 
   addVideos: (newVideos) => set((state) => ({
     videos: [...state.videos, ...newVideos]
@@ -86,6 +89,7 @@ export const useStore = create<AppState>((set) => ({
   })),
 
   setCurrentTime: (time) => set({ currentTime: time }),
+  setIsPlaying: (playing) => set({ isPlaying: playing, status: playing ? 'playing' : 'ready' }),
 
   reorderVideos: (startIndex, endIndex) => set((state) => {
     const result = Array.from(state.videos);
@@ -106,6 +110,7 @@ export const useStore = create<AppState>((set) => ({
     status: 'idle',
     currentStage: 'upload',
     syncSettings: { minDuration: 0.5, maxDuration: 4.0, algorithm: 'energy', videoMode: 'beat-locked', cropMode: 'smart', beatSensitivity: 100, durationVariance: 0, skipEveryN: 1 },
-    currentTime: 0
+    currentTime: 0,
+    isPlaying: false
   }),
 }));

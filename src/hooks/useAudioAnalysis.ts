@@ -12,16 +12,20 @@ export function useAudioAnalysis() {
         const decodeAudio = async () => {
             processingRef.current = true;
             setStatus('analyzing');
+            let audioContext: AudioContext | null = null;
             try {
                 const arrayBuffer = await audio.file.arrayBuffer();
-                const AudioContext = (window.AudioContext || (window as any).webkitAudioContext) as typeof window.AudioContext;
-                const audioContext = new AudioContext();
+                const AudioContextClass = (window.AudioContext || (window as any).webkitAudioContext) as typeof window.AudioContext;
+                audioContext = new AudioContextClass();
                 const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                setAudioBuffer(audioBuffer); // This triggers the next effect
+                setAudioBuffer(audioBuffer);
             } catch (e) {
                 console.error("Audio decoding error", e);
                 setStatus('idle');
             } finally {
+                if (audioContext) {
+                    audioContext.close().catch(console.error);
+                }
                 processingRef.current = false;
             }
         };
