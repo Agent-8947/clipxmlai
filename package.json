@@ -15,11 +15,13 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.26.1",
     "lucide-react": "^0.562.0",
+    "meyda": "^5.6.3",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-dropzone": "^14.3.8",
     "tailwind-merge": "^3.4.0",
+    "web-audio-beat-detector": "^8.2.33",
     "xmlbuilder2": "^4.0.3",
     "zustand": "^5.0.10"
   },

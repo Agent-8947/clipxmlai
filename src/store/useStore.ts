@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 
-export interface VideoClip {
+export interface MediaClip {
   id: string;
+  type: 'video' | 'image';
   file: File;
   name: string;
-  duration: number;
+  duration: number; // For images, default to a reasonable value or 0
   thumbnail: string;
 }
 
@@ -17,23 +18,37 @@ export interface AudioTrack {
   beats: number[]; // Array of timestamps in seconds
   bpm?: number; // Detected tempo
   detectedWithAlgorithm?: BeatAlgorithm;
+  instrumentBeats?: {
+    kick: number[];
+    snare: number[];
+    hihat: number[];
+  };
 }
 
 export type BeatAlgorithm = 'energy' | 'spectral' | 'ai' | 'drums' | 'bass' | 'guitar' | 'vocals' | 'voice' | 'words' | 'sentences' | 'melody' | 'brass' | 'keys' | 'silence' | 'downbeat' | 'phrase' | 'intensity' | 'harmonic' | 'combo-edm' | 'combo-clip';
+
+export interface RhythmSegment {
+  id: string;
+  startTime: number;
+  endTime: number;
+  skipEveryN: number;
+}
 
 export interface SyncSettings {
   minDuration: number;
   maxDuration: number;
   algorithm: BeatAlgorithm;
   videoMode: 'sequential-once' | 'random-loop' | 'beat-locked' | 'metronome';
-  cropMode: 'random' | 'smart';
+  cropMode: 'random' | 'smart' | 'center' | 'start' | 'end' | 'golden';
   beatSensitivity: number; // Min interval between beats in ms (debounce)
   durationVariance: number; // 0-100% random variance in clip duration
-  skipEveryN: number; // Cut on every Nth beat (1 = every beat, 2 = every 2nd, etc.)
+  skipEveryN: number; // Default fallback
+  rhythmSegments?: RhythmSegment[]; // Regions with specific override settings
+  manualBpm?: number; // Override BPM for metronome mode
 }
 
 interface AppState {
-  videos: VideoClip[];
+  media: MediaClip[];
   audio: AudioTrack | null;
   status: 'idle' | 'analyzing' | 'ready' | 'playing' | 'exporting';
   currentStage: 'upload' | 'editor' | 'export';
@@ -42,23 +57,23 @@ interface AppState {
   isPlaying: boolean;
 
   // Actions
-  addVideos: (videos: VideoClip[]) => void;
+  addMedia: (newMedia: MediaClip[]) => void;
   setAudio: (audio: AudioTrack) => void;
-  setBeats: (beats: number[], algorithm: BeatAlgorithm, bpm?: number) => void;
+  setBeats: (beats: number[], algorithm: BeatAlgorithm, bpm?: number, instrumentBeats?: { kick: number[], snare: number[], hihat: number[] }) => void;
   setAudioBuffer: (buffer: AudioBuffer) => void;
   setStatus: (status: AppState['status']) => void;
   setStage: (stage: AppState['currentStage']) => void;
   setSyncSettings: (settings: Partial<SyncSettings>) => void;
   setCurrentTime: (time: number) => void;
   setIsPlaying: (playing: boolean) => void;
-  reorderVideos: (startIndex: number, endIndex: number) => void;
-  removeVideo: (id: string) => void;
+  reorderMedia: (startIndex: number, endIndex: number) => void;
+  removeMedia: (id: string) => void;
   removeAudio: () => void;
   reset: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
-  videos: [],
+  media: [],
   audio: null,
   status: 'idle',
   currentStage: 'upload',
@@ -66,14 +81,14 @@ export const useStore = create<AppState>((set) => ({
   currentTime: 0,
   isPlaying: false,
 
-  addVideos: (newVideos) => set((state) => ({
-    videos: [...state.videos, ...newVideos]
+  addMedia: (newMedia) => set((state) => ({
+    media: [...state.media, ...newMedia]
   })),
 
   setAudio: (audio) => set({ audio }),
 
-  setBeats: (beats, algorithm, bpm) => set((state) => ({
-    audio: state.audio ? { ...state.audio, beats, bpm, detectedWithAlgorithm: algorithm } : null
+  setBeats: (beats, algorithm, bpm, instrumentBeats) => set((state) => ({
+    audio: state.audio ? { ...state.audio, beats, bpm, detectedWithAlgorithm: algorithm, instrumentBeats } : null
   })),
 
   setAudioBuffer: (buffer) => set((state) => ({
@@ -91,21 +106,21 @@ export const useStore = create<AppState>((set) => ({
   setCurrentTime: (time) => set({ currentTime: time }),
   setIsPlaying: (playing) => set({ isPlaying: playing, status: playing ? 'playing' : 'ready' }),
 
-  reorderVideos: (startIndex, endIndex) => set((state) => {
-    const result = Array.from(state.videos);
+  reorderMedia: (startIndex, endIndex) => set((state) => {
+    const result = Array.from(state.media);
     const [removed] = result.splice(startIndex, 1);
     result.splice(endIndex, 0, removed);
-    return { videos: result };
+    return { media: result };
   }),
 
-  removeVideo: (id) => set((state) => ({
-    videos: state.videos.filter((v) => v.id !== id)
+  removeMedia: (id) => set((state) => ({
+    media: state.media.filter((v) => v.id !== id)
   })),
 
   removeAudio: () => set({ audio: null }),
 
   reset: () => set({
-    videos: [],
+    media: [],
     audio: null,
     status: 'idle',
     currentStage: 'upload',

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore, BeatAlgorithm } from '@/store/useStore';
+import Meyda from 'meyda';
+import { analyzeFrequencyBands, detectBPMAndBeats } from '@/utils/rhythm-detector';
 
 export function useAudioAnalysis() {
     const { audio, setAudioBuffer, setBeats, setStatus, syncSettings } = useStore();
@@ -15,7 +17,7 @@ export function useAudioAnalysis() {
             let audioContext: AudioContext | null = null;
             try {
                 const arrayBuffer = await audio.file.arrayBuffer();
-                const AudioContextClass = (window.AudioContext || (window as any).webkitAudioContext) as typeof window.AudioContext;
+                const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
                 audioContext = new AudioContextClass();
                 const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
                 setAudioBuffer(audioBuffer);
@@ -24,7 +26,7 @@ export function useAudioAnalysis() {
                 setStatus('idle');
             } finally {
                 if (audioContext) {
-                    audioContext.close().catch(console.error);
+                    (audioContext as AudioContext).close().catch(console.error);
                 }
                 processingRef.current = false;
             }
@@ -95,11 +97,30 @@ export function useAudioAnalysis() {
                     }
 
                     // Calculate BPM from beats
-                    const bpm = calculateBPM(beats);
+                    // New: Advanced Analysis
+                    Promise.all([
+                        detectBPMAndBeats(originalBuffer),
+                        analyzeFrequencyBands(originalBuffer),
+                        analyzeInstrumentsFeatures(originalBuffer) // Meyda analysis
+                    ]).then(([bpmResult, instrumentBeats, features]) => {
+                        // Decide which BPM to use (detected or calculated)
+                        const finalBpm = bpmResult.bpm > 0 ? bpmResult.bpm : calculateBPM(beats);
 
-                    setBeats(beats, currentAlgo, bpm);
-                    setStatus('ready');
-                    processingRef.current = false;
+                        // If algorithm is specific instrument, we might want to override beats with instrument beats?
+                        // For now, we merge or keep user selected, but we store the instrument tracks.
+
+                        setBeats(beats, currentAlgo, finalBpm, instrumentBeats);
+                        setStatus('ready');
+                        processingRef.current = false;
+
+                        console.log("Meyda Features:", features);
+                    }).catch(err => {
+                        console.error("Advanced analysis failed", err);
+                        // Fallback
+                        setBeats(beats, currentAlgo, calculateBPM(beats));
+                        setStatus('ready');
+                        processingRef.current = false;
+                    });
                 }, 50);
 
             } catch (e) {
@@ -112,6 +133,34 @@ export function useAudioAnalysis() {
         processBeats();
 
     }, [audio?.buffer, audio?.id, syncSettings.algorithm, syncSettings.beatSensitivity, setBeats, setStatus]);
+}
+
+async function analyzeInstrumentsFeatures(buffer: AudioBuffer) {
+    // Extract global features using Meyda
+    // We'll take a few snapshots or average across the track
+    const signal = buffer.getChannelData(0);
+    // Removed unused hopSize variable
+
+    // We can't process the whole 3 min song in one go with Meyda easily without loop
+    // Let's just sample center of the song for "Vibe" analysis
+    const center = Math.floor(signal.length / 2);
+    // Ensure slice is within bounds and power of 2 for FFT
+    const sliceSize = 4096;
+    if (signal.length < sliceSize) return null;
+
+    const start = Math.min(center, signal.length - sliceSize);
+    const slice = signal.slice(start, start + sliceSize);
+
+    // Check if Meyda is loaded
+    if (!Meyda || !Meyda.extract) return null;
+
+    try {
+        const features = Meyda.extract(['energy', 'loudness', 'spectralCentroid'], slice);
+        return features;
+    } catch (e) {
+        console.warn("Meyda extraction failed", e);
+        return null;
+    }
 }
 
 

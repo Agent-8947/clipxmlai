@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { generateTimeline } from '@/utils/auto-editor';
 import { generateXML } from '@/utils/xml-generator';
 import {
-  Download, Sparkles, Wand2, Music, Video as VideoIcon,
+  Download, Sparkles, Wand2, Music, Video as VideoIcon, Image as ImageIcon,
   ChevronRight, CheckCircle2, LayoutTemplate, ArrowRight, Trash2, X,
   Settings, RefreshCw, GripVertical, CodeXml
 } from 'lucide-react';
@@ -20,7 +20,7 @@ import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 export default function Home() {
-  const { videos, audio, status, currentStage, setStage, removeVideo, removeAudio, syncSettings, setSyncSettings } = useStore();
+  const { media, audio, status, currentStage, setStage, removeMedia, removeAudio, syncSettings, setSyncSettings } = useStore();
   useAudioAnalysis();
 
   const [title, setTitle] = useState("CLIP--XML");
@@ -34,7 +34,7 @@ export default function Home() {
 
   const handleExport = () => {
     if (!audio) return;
-    const timeline = generateTimeline(videos, audio, syncSettings);
+    const timeline = generateTimeline(media, audio, syncSettings);
     const xml = generateXML(timeline, audio, title);
 
     const blob = new Blob([xml], { type: 'text/xml' });
@@ -46,7 +46,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const isUploadComplete = videos.length > 0 && !!audio;
+  const isUploadComplete = media.length > 0 && !!audio;
 
   // Navigation Steps
   const steps = [
@@ -112,36 +112,43 @@ export default function Home() {
               <div className="space-y-4 flex flex-col">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold flex items-center gap-2 text-white">
-                    <VideoIcon className="w-5 h-5 text-blue-400" /> Video Clips
+                    <VideoIcon className="w-5 h-5 text-blue-400" /> Source Media
                   </h3>
-                  <span className={clsx("text-xs px-2 py-1 rounded-full", videos.length > 0 ? "bg-green-500/20 text-green-400" : "bg-surface text-muted")}>
-                    {videos.length} clips
+                  <span className={clsx("text-xs px-2 py-1 rounded-full", media.length > 0 ? "bg-green-500/20 text-green-400" : "bg-surface text-muted")}>
+                    {media.length} items
                   </span>
                 </div>
 
                 <Dropzone type="video" className="h-[200px] border-dashed border-2 border-border hover:border-primary/50 transition-colors" />
 
-                {/* Video List */}
-                {videos.length > 0 && (
+                {/* Media List */}
+                {media.length > 0 && (
                   <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
-                    {videos.map((video) => (
-                      <div key={video.id} className="group relative aspect-video bg-surface rounded-lg overflow-hidden border border-border shadow-sm hover:border-primary/50 transition-all">
-                        {video.thumbnail && (
-                          <img src={video.thumbnail} alt={video.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                    {media.map((item) => (
+                      <div key={item.id} className="group relative aspect-video bg-surface rounded-lg overflow-hidden border border-border shadow-sm hover:border-primary/50 transition-all">
+                        {item.thumbnail && (
+                          <img src={item.thumbnail} alt={item.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                         )}
                         <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors" />
 
+                        {/* Type Indicator */}
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-black/60 rounded text-[10px] text-white backdrop-blur-sm flex items-center gap-1">
+                          {item.type === 'video' ? <VideoIcon className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                        </div>
+
                         <button
-                          onClick={() => removeVideo(video.id)}
+                          onClick={() => removeMedia(item.id)}
                           className="absolute top-1.5 right-1.5 p-1.5 bg-black/60 hover:bg-red-500 text-white rounded-md backdrop-blur-sm transition-all opacity-0 group-hover:opacity-100 transform translate-y-1 group-hover:translate-y-0"
-                          title="Remove clip"
+                          title="Remove item"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
 
                         <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/50 to-transparent">
-                          <p className="text-xs text-white truncate font-medium">{video.name}</p>
-                          <p className="text-[10px] text-gray-300 font-mono">{(video.duration).toFixed(1)}s</p>
+                          <p className="text-xs text-white truncate font-medium">{item.name}</p>
+                          <p className="text-[10px] text-gray-300 font-mono">
+                            {item.type === 'video' ? `${(item.duration).toFixed(1)}s` : 'IMG'}
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -228,6 +235,60 @@ export default function Home() {
                   </div>
                 )}
 
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const data = JSON.stringify({
+                        version: 1,
+                        title,
+                        syncSettings
+                      }, null, 2);
+                      const blob = new Blob([data], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${title || 'project'}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="p-2 bg-surface hover:bg-surface/80 border border-border rounded-lg text-muted hover:text-white transition-colors"
+                    title="Save Project (Settings & Rhythm)"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <label className="p-2 bg-surface hover:bg-surface/80 border border-border rounded-lg text-muted hover:text-white transition-colors cursor-pointer" title="Load Project">
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          try {
+                            const json = JSON.parse(ev.target?.result as string);
+                            if (json.syncSettings) {
+                              setSyncSettings(json.syncSettings);
+                            }
+                            if (json.title) setTitle(json.title);
+                          } catch (err) {
+                            console.error("Failed to parse project file", err);
+                            alert("Invalid project file");
+                          }
+                        };
+                        reader.readAsText(file);
+                        e.target.value = ''; // Reset
+                      }}
+                    />
+                    <div className="rotate-180">
+                      <Download className="w-4 h-4" />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="w-[1px] h-6 bg-border mx-2" />
+
                 <button
                   onClick={() => setStage('export')}
                   className="bg-primary hover:bg-primary-hover text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
@@ -239,10 +300,10 @@ export default function Home() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 h-[calc(100vh-250px)]">
               {/* Left: Settings & Storyboard */}
-              <div className="lg:col-span-12 xl:col-span-4 flex flex-col gap-4 h-full overflow-hidden">
+              <div className="lg:col-span-12 xl:col-span-4 flex flex-col gap-4 h-full overflow-y-auto custom-scrollbar pr-2 pb-10">
 
                 {/* Sync Settings Panel */}
-                <div className="bg-surface rounded-xl border border-gray-800 p-4 shadow-sm shrink-0">
+                <div className="bg-surface rounded-xl border border-gray-800 p-6 shadow-sm shrink-0">
                   <div className="flex items-center gap-2 mb-4 text-white font-medium border-b border-gray-800 pb-2">
                     <Settings className="w-4 h-4 text-primary" /> Sync Settings
                   </div>
@@ -301,39 +362,43 @@ export default function Home() {
                       onChange={(e) => setSyncSettings({ algorithm: e.target.value as BeatAlgorithm })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
-                      <optgroup label="🎯 General">
-                        <option value="energy">⚡ Energy Based (Standard)</option>
-                        <option value="spectral">🌊 Frequency (spectral)</option>
-                      </optgroup>
-                      <optgroup label="🎛️ Instruments">
-                        <option value="drums">🥁 Drums (Kick/Snare)</option>
-                        <option value="bass">🎸 Bass (Low Freq)</option>
-                        <option value="guitar">🎸 Guitar (Mid Freq)</option>
-                        <option value="brass">🎺 Brass (Horns)</option>
-                        <option value="keys">🎹 Keys (Piano/Synth)</option>
-                      </optgroup>
-                      <optgroup label="🎤 Voice">
-                        <option value="vocals">🎤 Vocals (Singing)</option>
-                        <option value="voice">🗣️ Voice (Speech)</option>
-                        <option value="words">💬 Words (По словам)</option>
-                        <option value="sentences">📝 Sentences (По предложениям)</option>
-                      </optgroup>
-                      <optgroup label="🎼 Structure">
-                        <option value="melody">🎵 Melody (Мелодия)</option>
-                        <option value="silence">🔇 Silence (Паузы)</option>
-                        <option value="downbeat">1️⃣ Downbeat (Первый бит)</option>
-                        <option value="phrase">🎼 Phrase (Фразы 4-8 тактов)</option>
-                        <option value="intensity">📈 Intensity (Build-up/Drop)</option>
-                        <option value="harmonic">🎹 Harmonic (Смена аккордов)</option>
-                      </optgroup>
-                      <optgroup label="🔥 Combo">
-                        <option value="combo-edm">🔥 EDM (Drums+Bass)</option>
-                        <option value="combo-clip">🎬 Music Video (Vocals+Drums)</option>
-                      </optgroup>
-                      <optgroup label="🧪 Experimental">
-                        <option value="ai">🧠 AI Model (Legacy)</option>
-                      </optgroup>
+                      <option value="energy">⚡ Energy Based (Standard)</option>
+                      <option value="spectral">🌊 Frequency (spectral)</option>
+                      <option value="drums">🥁 Drums (Kick/Snare)</option>
+                      <option value="vocals">🎤 Vocals (Singing)</option>
+                      <option value="ai">🧠 AI Model (Legacy)</option>
                     </select>
+                  </div>
+
+                  {/* Sync Mode (Video Arrangement) - Moved Here */}
+                  <div className="mt-4 space-y-2">
+                    <label className="text-xs text-muted uppercase tracking-wider font-semibold">Synchronization Mode</label>
+                    <select
+                      value={syncSettings.videoMode || 'beat-locked'}
+                      title="How clips are arranged on the timeline"
+                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as any })}
+                      className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
+                    >
+                      <option value="beat-locked">🎯 Beat-Locked (Adaptive)</option>
+                      <option value="metronome">⏲️ Metronome (Fixed BPM)</option>
+                      <option value="random-loop">🔀 Random Loop (Fill)</option>
+                      <option value="sequential-once">1️⃣ Sequential (One Pass)</option>
+                    </select>
+
+                    {syncSettings.videoMode === 'metronome' && (
+                      <div className="mt-2 pl-2 border-l-2 border-primary/50 animate-in fade-in slide-in-from-top-1 duration-200">
+                        <label className="text-xs text-muted uppercase tracking-wider font-semibold text-primary">Beats Per Minute (BPM)</label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="300"
+                          value={syncSettings.manualBpm || audio?.bpm || 120}
+                          title="Set manual BPM"
+                          onChange={(e) => setSyncSettings({ manualBpm: parseInt(e.target.value) })}
+                          className="w-full mt-1 bg-black/50 border border-primary rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none font-mono font-bold"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Beat Sensitivity (Debounce) */}
@@ -365,11 +430,11 @@ export default function Home() {
                       onChange={(e) => setSyncSettings({ beatSensitivity: parseInt(e.target.value) })}
                       disabled={(syncSettings.beatSensitivity || 0) === 0}
                       className={`w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary ${(syncSettings.beatSensitivity || 0) === 0 ? 'opacity-30' : ''}`}
-                      title="Минимальный интервал между битами (меньше = больше битов)"
+                      title="Minimum interval between beats (lower = more beats)"
                     />
                     <div className="flex justify-between text-[10px] text-muted">
-                      <span>50ms (очень часто)</span>
-                      <span>2s (редко)</span>
+                      <span>50ms (Very frequent)</span>
+                      <span>2s (Rare)</span>
                     </div>
                   </div>
 
@@ -377,7 +442,7 @@ export default function Home() {
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="text-xs text-muted uppercase tracking-wider font-semibold">Skip Beats</label>
-                      <span className="text-xs text-primary font-mono">каждый {syncSettings.skipEveryN || 1}-й</span>
+                      <span className="text-xs text-primary font-mono">Every {syncSettings.skipEveryN || 1} beat(s)</span>
                     </div>
                     <select
                       value={syncSettings.skipEveryN || 1}
@@ -385,11 +450,15 @@ export default function Home() {
                       onChange={(e) => setSyncSettings({ skipEveryN: parseInt(e.target.value) })}
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
-                      <option value={1}>Каждый бит</option>
-                      <option value={2}>Каждый 2-й бит</option>
-                      <option value={3}>Каждый 3-й бит</option>
-                      <option value={4}>Каждый 4-й бит (1 на такт)</option>
-                      <option value={8}>Каждый 8-й бит (редко)</option>
+                      <option value={1}>Every beat</option>
+                      <option value={2}>Every 2nd beat</option>
+                      <option value={3}>Every 3rd beat</option>
+                      <option value={4}>Every 4th beat (1 bar)</option>
+                      <option value={8}>Every 8th beat (Rare)</option>
+                      <option value={16}>Every 16th beat (Very rare)</option>
+                      <option value={24}>Every 24th beat</option>
+                      <option value={32}>Every 32nd beat</option>
+                      <option value={48}>Every 48th beat</option>
                     </select>
                   </div>
 
@@ -407,49 +476,15 @@ export default function Home() {
                       value={syncSettings.durationVariance || 0}
                       onChange={(e) => setSyncSettings({ durationVariance: parseInt(e.target.value) })}
                       className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary"
-                      title="Случайная вариация длительности клипов"
+                      title="Random clip duration variance"
                     />
                     <div className="flex justify-between text-[10px] text-muted">
-                      <span>0% (точно)</span>
-                      <span>50% (разнообразно)</span>
+                      <span>0% (Precise)</span>
+                      <span>50% (Varied)</span>
                     </div>
                   </div>
 
-                  {/* Quick Presets */}
-                  <div className="mt-4 space-y-2">
-                    <label className="text-xs text-muted uppercase tracking-wider font-semibold">Quick Preset</label>
-                    <select
-                      onChange={(e) => {
-                        const preset = e.target.value;
-                        if (preset === 'fast-cuts') {
-                          setSyncSettings({ algorithm: 'drums', beatSensitivity: 100, skipEveryN: 1, durationVariance: 10 });
-                        } else if (preset === 'chill') {
-                          setSyncSettings({ algorithm: 'phrase', beatSensitivity: 1000, skipEveryN: 4, durationVariance: 20 });
-                        } else if (preset === 'music-video') {
-                          setSyncSettings({ algorithm: 'combo-clip', beatSensitivity: 200, skipEveryN: 2, durationVariance: 15 });
-                        } else if (preset === 'edm-drop') {
-                          setSyncSettings({ algorithm: 'intensity', beatSensitivity: 500, skipEveryN: 1, durationVariance: 0 });
-                        } else if (preset === 'melodic') {
-                          setSyncSettings({ algorithm: 'harmonic', beatSensitivity: 800, skipEveryN: 4, durationVariance: 25 });
-                        } else if (preset === 'speech') {
-                          setSyncSettings({ algorithm: 'sentences', beatSensitivity: 500, skipEveryN: 1, durationVariance: 10 });
-                        } else if (preset === 'metronome') {
-                          setSyncSettings({ videoMode: 'metronome', skipEveryN: 1, durationVariance: 0 });
-                        }
-                      }}
-                      title="Quick Presets Selection"
-                      className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
-                    >
-                      <option value="">— Выбрать пресет —</option>
-                      <option value="fast-cuts">⚡ Fast Cuts (быстрые склейки)</option>
-                      <option value="chill">🌊 Chill (спокойный)</option>
-                      <option value="music-video">🎬 Music Video (клип)</option>
-                      <option value="edm-drop">🔥 EDM Drop (дропы)</option>
-                      <option value="melodic">🎵 Melodic (мелодичный)</option>
-                      <option value="speech">🎤 Speech (речь/подкаст)</option>
-                      <option value="metronome">⏲️ Metronome (сетка BPM)</option>
-                    </select>
-                  </div>
+
 
                   {/* Crop Mode Selector */}
                   <div className="mt-4 space-y-2">
@@ -461,23 +496,11 @@ export default function Home() {
                       className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
                     >
                       <option value="smart">🎯 Smart (Weighted Center)</option>
+                      <option value="center">🎯 Center (Strict)</option>
+                      <option value="start">⏮️ Start (Beginning)</option>
+                      <option value="end">⏭️ End (Finishing)</option>
+                      <option value="golden">✨ Golden Ratio (Cinematic)</option>
                       <option value="random">🎲 Random (Full Range)</option>
-                    </select>
-                  </div>
-
-                  {/* Video Placement Selector */}
-                  <div className="mt-4 space-y-2">
-                    <label className="text-xs text-muted uppercase tracking-wider font-semibold">Video Arrangement</label>
-                    <select
-                      value={syncSettings.videoMode || 'beat-locked'}
-                      title="Video Clip Arrangement Mode"
-                      onChange={(e) => setSyncSettings({ videoMode: e.target.value as any })}
-                      className="w-full bg-black/50 border border-gray-800 rounded px-2 py-1.5 text-sm text-white focus:border-primary outline-none"
-                    >
-                      <option value="beat-locked">🎯 Beat-Locked (Точно по битам)</option>
-                      <option value="metronome">⏲️ Metronome (По сетке BPM)</option>
-                      <option value="random-loop">🔀 Random Loop (Fill Track)</option>
-                      <option value="sequential-once">1️⃣ Sequential (One Pass)</option>
                     </select>
                   </div>
 
@@ -485,7 +508,6 @@ export default function Home() {
                   <div className="mt-4 flex justify-end">
                     <button
                       onClick={() => {
-                        // Trick to force regen: slightly toggle minDuration then back? 
                         // Actually, purely creating a new object ref in store might trigger it if we change a 'seed' or similar. 
                         // But right now randomization happens every time generateTimeline is called.
                         // And generateTimeline is called when syncSettings changes.
@@ -499,7 +521,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="bg-surface rounded-xl border border-border p-4 shadow-sm flex-1 overflow-y-auto">
+                <div className="bg-surface rounded-xl border border-border p-4 shadow-sm shrink-0">
                   <Storyboard />
                 </div>
               </div>

@@ -12,23 +12,21 @@ function formatTime(seconds: number) {
 }
 
 export default function Player() {
-    const { videos, audio, currentTime, setCurrentTime, setStatus, syncSettings, isPlaying, setIsPlaying } = useStore();
+    const { media, audio, currentTime, setCurrentTime, syncSettings, isPlaying, setIsPlaying } = useStore();
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
 
-
-
     // Memoize timeline logic
-    const timeline = useMemo(() => audio ? generateTimeline(videos, audio, syncSettings) : [], [videos, audio, syncSettings]);
+    const timeline = useMemo(() => audio ? generateTimeline(media, audio, syncSettings) : [], [media, audio, syncSettings]);
 
-    // Manage Video Object URLs
-    const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
+    // Manage Media Object URLs
+    const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        const newUrls: Record<string, string> = { ...videoUrls };
+        const newUrls: Record<string, string> = { ...mediaUrls };
         let changed = false;
-        videos.forEach(v => {
+        media.forEach(v => {
             if (!newUrls[v.id]) {
                 newUrls[v.id] = URL.createObjectURL(v.file);
                 changed = true;
@@ -36,12 +34,13 @@ export default function Player() {
         });
 
         if (changed) {
-            setVideoUrls(newUrls);
+            setMediaUrls(newUrls);
         }
 
         // Potential cleanup if needed:
         // return () => Object.values(newUrls).forEach(URL.revokeObjectURL);
-    }, [videos]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [media]);
 
     // Audio Source setup
     useEffect(() => {
@@ -52,87 +51,118 @@ export default function Player() {
         }
     }, [audio?.id, audio?.file]);
 
-    // Sync Loop (RAF)
+    // Effect: Handle Play/Pause Command
     useEffect(() => {
-        let animationFrame: number = 0;
+        const audioEl = audioRef.current;
+        if (!audioEl) return;
 
+        if (isPlaying) {
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.warn("Playback prevented/interrupted:", error);
+                });
+            }
+        } else {
+            audioEl.pause();
+        }
+    }, [isPlaying, audio?.id]); // Re-run if playing state changes or audio file changes
+
+    // Effect: Sync Loop (RAF) - Update Store Time from Audio
+    // Use a ref to track last dispatched time to avoid dependency cycles and stale closures
+    const lastDispatchedTimeRef = useRef(currentTime);
+
+    useEffect(() => {
+        if (!isPlaying) return;
+
+        let animationFrame: number = 0;
         const tick = () => {
-            if (audioRef.current && isPlaying) {
+            if (audioRef.current) {
                 const time = audioRef.current.currentTime;
-                if (Math.abs(time - currentTime) > 0.05) {
-                    // Throttle updates slightly to avoid react render thrashing? 
-                    // Zustand is fast.
+                // Only update store if difference is significant to avoid thrashing
+                if (Math.abs(time - lastDispatchedTimeRef.current) > 0.05) {
                     setCurrentTime(time);
+                    lastDispatchedTimeRef.current = time;
                 }
 
-                if (time >= (audioRef.current.duration || 0) && !audioRef.current.paused) {
-                    if (audioRef.current.ended) {
-                        setIsPlaying(false);
-                    }
+                if (audioRef.current.ended) {
+                    setIsPlaying(false);
                 }
             }
             animationFrame = requestAnimationFrame(tick);
         };
 
-        if (isPlaying) {
-            audioRef.current?.play().catch(e => console.error("Audio play failed", e));
-            tick();
-        } else {
-            audioRef.current?.pause();
-            cancelAnimationFrame(animationFrame);
-        }
+        tick();
 
         return () => cancelAnimationFrame(animationFrame);
-    }, [isPlaying, setCurrentTime]);
+    }, [isPlaying, setCurrentTime, setIsPlaying]);
 
-    // Video Sync Logic
+    // Effect: Sync Audio Time from Store (Scrubbing/Seeking)
+    // Only seek audio if store time changes significantly AND it wasn't just updated by the loop (check vs lastDispatchedTimeRef)
     useEffect(() => {
-        if (!videoRef.current || timeline.length === 0) return;
+        if (audioRef.current) {
+            const diff = Math.abs(audioRef.current.currentTime - currentTime);
+            // If playing, we expect small diffs (lag), ignore them.
+            // If paused, we want precise sync.
+            const tolerance = isPlaying ? 0.25 : 0.05;
 
-        const activeClip = timeline.find(c => currentTime >= c.timelineStart && currentTime < c.timelineEnd);
+            if (diff > tolerance) {
+                // Check if this change came from our own loop to avoid fighting
+                // If currentTime matches lastDispatchedTimeRef, it likely came from the loop.
+                if (Math.abs(currentTime - lastDispatchedTimeRef.current) > 0.001) {
+                    audioRef.current.currentTime = currentTime;
+                    lastDispatchedTimeRef.current = currentTime;
+                }
+            }
+        }
+        // Always update ref to current time to keep in sync
+        if (!isPlaying) {
+            lastDispatchedTimeRef.current = currentTime;
+        }
+    }, [currentTime, isPlaying]);
 
-        if (activeClip) {
-            const url = videoUrls[activeClip.videoId];
+    // Derived State for Render
+    const activeClip = useMemo(() => {
+        if (timeline.length === 0) return null;
+        return timeline.find(c => currentTime >= c.timelineStart && currentTime < c.timelineEnd);
+    }, [currentTime, timeline]);
+
+    const activeClipType = activeClip?.type || null;
+    const activeImgSrc = (activeClip && activeClip.type === 'image') ? mediaUrls[activeClip.videoId] : null;
+
+    // Effect: Sync Video Element only
+    useEffect(() => {
+        const videoEl = videoRef.current;
+        if (!videoEl) return;
+
+        if (activeClip && activeClip.type === 'video') {
+            const url = mediaUrls[activeClip.videoId];
 
             // 1. Check if we need to swap source
-            // Comparing src directly might be full absolute path vs blob, so strictly check
-            if (videoRef.current.getAttribute('data-id') !== activeClip.videoId) {
-                videoRef.current.src = url;
-                videoRef.current.setAttribute('data-id', activeClip.videoId);
-                // Ensure we don't flash
+            if (videoEl.getAttribute('data-id') !== activeClip.videoId) {
+                videoEl.src = url || '';
+                videoEl.setAttribute('data-id', activeClip.videoId);
             }
 
             // 2. Sync Time
             const offset = currentTime - activeClip.timelineStart;
             const targetTime = activeClip.sourceStart + offset;
 
-            // Only seek if drift is significant (> 1 frame roughly)
-            if (Math.abs(videoRef.current.currentTime - targetTime) > 0.1) {
-                videoRef.current.currentTime = targetTime;
+            if (Math.abs(videoEl.currentTime - targetTime) > 0.1) {
+                videoEl.currentTime = targetTime;
             }
 
-            // 3. Play/Pause video element
-            if (isPlaying && videoRef.current.paused) {
-                videoRef.current.play().catch(() => { });
-            } else if (!isPlaying && !videoRef.current.paused) {
-                videoRef.current.pause();
+            // 3. Play/Pause
+            if (isPlaying && videoEl.paused) {
+                videoEl.play().catch(() => { });
+            } else if (!isPlaying && !videoEl.paused) {
+                videoEl.pause();
             }
-
-            // Playback rate sync? Usually 1.0
         } else {
-            // Should not happen if timeline covers all, but valid check
-            if (!videoRef.current.paused) videoRef.current.pause();
+            // Not a video clip or no clip
+            if (!videoEl.paused) videoEl.pause();
         }
-    }, [currentTime, timeline, isPlaying, videoUrls]);
-
-    // External Seek Handling (User clicked timeline)
-    useEffect(() => {
-        if (audioRef.current) {
-            if (Math.abs(audioRef.current.currentTime - currentTime) > 0.5) {
-                audioRef.current.currentTime = currentTime;
-            }
-        }
-    }, [currentTime]);
+    }, [currentTime, activeClip, isPlaying, mediaUrls]);
 
     const togglePlay = () => {
         setIsPlaying(!isPlaying);
@@ -142,13 +172,25 @@ export default function Player() {
 
     return (
         <div className="bg-black rounded-xl overflow-hidden shadow-2xl shadow-primary/10 border border-gray-800 flex flex-col items-center max-w-4xl mx-auto w-full">
-            <div className="aspect-video w-full relative bg-black flex items-center justify-center group">
+            <div className="aspect-video w-full relative bg-black flex items-center justify-center group text-white">
+                {/* Video Element */}
                 <video
                     ref={videoRef}
-                    className="w-full h-full object-contain"
+                    className={`w-full h-full object-contain ${activeClipType === 'video' ? 'block' : 'hidden'}`}
                     muted
                     playsInline
                 />
+
+                {/* Image Element */}
+                {activeClipType === 'image' && activeImgSrc && (
+                    <img
+                        src={activeImgSrc}
+                        alt="Current Frame"
+                        className="w-full h-full object-contain animate-in fade-in duration-300"
+                    />
+                )}
+
+                {!activeClipType && <div className="text-muted text-sm">No Signal</div>}
 
                 <div
                     className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity cursor-pointer ${isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}

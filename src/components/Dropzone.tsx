@@ -3,7 +3,7 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone, Accept } from 'react-dropzone';
 import { Upload, Music, Video, Loader2, FileAudio, FileVideo } from 'lucide-react';
-import { useStore, VideoClip } from '@/store/useStore';
+import { useStore, MediaClip } from '@/store/useStore';
 import { getVideoMetadata } from '@/utils/file-helpers';
 import { twMerge } from 'tailwind-merge';
 
@@ -14,29 +14,31 @@ interface DropzoneProps {
 }
 
 export default function Dropzone({ type, label, className }: DropzoneProps) {
-    const { addVideos, setAudio, audio, videos } = useStore();
+    const { addMedia, setAudio, audio, media } = useStore();
     const [loading, setLoading] = useState(false);
 
     // Set accepted checks based on type prop
+    // Modified: 'video' type now accepts images too
     const accept: Accept = type === 'video'
-        ? { 'video/*': [] }
+        ? { 'video/*': [], 'image/*': [] }
         : type === 'audio'
             ? { 'audio/*': [] }
-            : { 'video/*': [], 'audio/*': [] };
+            : { 'video/*': [], 'image/*': [], 'audio/*': [] };
 
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
         setLoading(true);
-        const newVideos: VideoClip[] = [];
+        const newMedia: MediaClip[] = [];
         let newAudio = null;
 
         try {
             for (const file of acceptedFiles) {
                 const isAudio = file.type.startsWith('audio/');
                 const isVideo = file.type.startsWith('video/');
+                const isImage = file.type.startsWith('image/');
 
                 // Guard clause for strict modes
                 if (type === 'audio' && !isAudio) continue;
-                if (type === 'video' && !isVideo) continue;
+                if (type === 'video' && !isVideo && !isImage) continue;
 
                 if (isAudio) {
                     // If dropping into audio zone, replace current
@@ -53,25 +55,37 @@ export default function Dropzone({ type, label, className }: DropzoneProps) {
                 } else if (isVideo) {
                     const metadata = await getVideoMetadata(file);
                     if (metadata.duration > 0) {
-                        newVideos.push({
+                        newMedia.push({
                             id: crypto.randomUUID(),
+                            type: 'video',
                             file,
                             name: file.name,
                             duration: metadata.duration,
                             thumbnail: metadata.thumbnail
                         });
                     }
+                } else if (isImage) {
+                    // Quick image processing to get thumbnail (URL)
+                    const url = URL.createObjectURL(file);
+                    newMedia.push({
+                        id: crypto.randomUUID(),
+                        type: 'image',
+                        file,
+                        name: file.name,
+                        duration: 5.0, // Default virtual duration for images
+                        thumbnail: url
+                    });
                 }
             }
 
             if (newAudio) setAudio(newAudio);
-            if (newVideos.length > 0) addVideos(newVideos);
+            if (newMedia.length > 0) addMedia(newMedia);
         } catch (e) {
             console.error("Error processing files", e);
         } finally {
             setLoading(false);
         }
-    }, [addVideos, setAudio, audio, type]);
+    }, [addMedia, setAudio, audio, type]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -79,11 +93,11 @@ export default function Dropzone({ type, label, className }: DropzoneProps) {
     });
 
     // Visuals dependent on type
-    const isFilled = type === 'audio' ? !!audio : videos.length > 0;
+    const isFilled = type === 'audio' ? !!audio : media.length > 0;
 
     const Icon = type === 'audio'
         ? (audio ? Music : FileAudio)
-        : (videos.length > 0 ? Video : FileVideo);
+        : (media.length > 0 ? Video : FileVideo);
 
     return (
         <div
@@ -111,7 +125,7 @@ export default function Dropzone({ type, label, className }: DropzoneProps) {
                         <p className="text-xs text-muted max-w-[200px] mx-auto truncate">
                             {type === 'audio'
                                 ? (audio ? `Current: ${audio.name}` : "Drop MP3/WAV file")
-                                : (videos.length > 0 ? `${videos.length} videos ready` : "Drop video folder")
+                                : (media.length > 0 ? `${media.length} items ready` : "Drop videos or images")
                             }
                         </p>
                     </div>

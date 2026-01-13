@@ -5,9 +5,10 @@ import { useStore } from '@/store/useStore';
 import { generateTimeline } from '@/utils/auto-editor';
 import { clsx } from 'clsx';
 import { Play, Pause, SkipBack, ZoomIn, ZoomOut } from 'lucide-react';
+import RhythmTrack from './RhythmTrack';
 
 export default function Timeline() {
-    const { videos, audio, currentTime, setCurrentTime, syncSettings, isPlaying, setIsPlaying } = useStore();
+    const { media, audio, currentTime, setCurrentTime, syncSettings, isPlaying, setIsPlaying } = useStore();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
@@ -17,13 +18,49 @@ export default function Timeline() {
     const [zoom, setZoom] = useState(1);
     const [showGrid, setShowGrid] = useState(false);
 
+    // Anchor zoom to playhead (Keep playhead centered when zooming)
+    const prevZoomRef = useRef(zoom);
+    React.useLayoutEffect(() => {
+        if (Math.abs(prevZoomRef.current - zoom) > 0.001) {
+            if (scrollContainerRef.current && audio?.duration) {
+                const container = scrollContainerRef.current;
+                const viewWidth = container.clientWidth;
+                // Calculate position relative to the playhead
+                const playHeadPct = currentTime / (audio.duration || 1);
+
+                // New total width approx (since zoom is relative to viewWidth)
+                const totalWidth = viewWidth * zoom;
+                const centerPos = totalWidth * playHeadPct;
+
+                // Center the playhead
+                container.scrollLeft = centerPos - (viewWidth / 2);
+            }
+            prevZoomRef.current = zoom;
+        }
+    }, [zoom, currentTime, audio?.duration]);
+
+    const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.2, 50));
+    const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.2, 1));
+
+    const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            // Smoother, finer control
+            const delta = e.deltaY * -0.002;
+            setZoom(prev => {
+                const next = prev + delta;
+                return Math.min(Math.max(next, 1), 50);
+            });
+        }
+    };
+
+    const [isDragging, setIsDragging] = useState(false);
+
     // Generate timeline data
     const timelineClips = useMemo(() => {
-        if (!audio || videos.length === 0) return [];
-        return generateTimeline(videos, audio, syncSettings);
-    }, [videos, audio, syncSettings]);
-
-
+        if (!audio || media.length === 0) return [];
+        return generateTimeline(media, audio, syncSettings);
+    }, [media, audio, syncSettings]);
 
     // --- Audio Playback & Sync ---
 
@@ -40,15 +77,12 @@ export default function Timeline() {
             if (playPromise !== undefined) {
                 playPromise.catch(error => {
                     console.warn("Playback prevented:", error);
-                    // Do not reset isPlaying here to avoid UI flicker, let user try again
                 });
             }
         } else {
             el.pause();
         }
     }, [isPlaying, audioKey]);
-
-
 
     const handleAudioEnded = () => {
         setIsPlaying(false);
@@ -100,8 +134,6 @@ export default function Timeline() {
         if (!el) return;
 
         const diff = Math.abs(el.currentTime - currentTime);
-        // If playing, allow tolerance to avoid fighting with RAF updates
-        // If paused, tight tolerance for scrubbing
         const tolerance = isPlaying ? 0.2 : 0.05;
 
         if (diff > tolerance) {
@@ -113,8 +145,26 @@ export default function Timeline() {
         setIsPlaying(!isPlaying);
     };
 
-    const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.5, 10)); // Max 10x
-    const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.5, 1)); // Min 1x
+    // Auto-Scroll Logic
+    const [autoScroll, setAutoScroll] = useState(true);
+
+    useEffect(() => {
+        if (!autoScroll || !isPlaying || !scrollContainerRef.current || !audio?.duration) return;
+
+        const container = scrollContainerRef.current;
+        const totalWidth = container.scrollWidth;
+        const viewWidth = container.clientWidth;
+
+        const playHeadPct = currentTime / audio.duration;
+        const playHeadPos = totalWidth * playHeadPct;
+
+        // Keep playhead centered (offset by half view width)
+        const targetScroll = playHeadPos - (viewWidth / 2);
+
+        // Apply scroll (don't smooth scroll during playback as it causes lag/jitters)
+        container.scrollLeft = targetScroll;
+
+    }, [currentTime, isPlaying, audio?.duration, autoScroll, zoom]);
 
     // --- Visualization ---
     useEffect(() => {
@@ -145,14 +195,12 @@ export default function Timeline() {
 
             ctx.clearRect(0, 0, width, height);
 
-            // Draw Center Line
             ctx.beginPath();
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
             ctx.moveTo(0, height / 2);
             ctx.lineTo(width, height / 2);
             ctx.stroke();
 
-            // Gradient
             const gradient = ctx.createLinearGradient(0, 0, 0, height);
             gradient.addColorStop(0, 'rgba(56, 189, 248, 0.2)');
             gradient.addColorStop(0.5, 'rgba(56, 189, 248, 0.9)');
@@ -184,8 +232,7 @@ export default function Timeline() {
 
         return () => observer.disconnect();
 
-    }, [audio?.buffer, zoom]); // Re-draw on zoom change as container size changes
-
+    }, [audio?.buffer, zoom]);
 
     // Interaction Handlers (Attached to Inner Container)
     const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -195,16 +242,6 @@ export default function Timeline() {
         const percent = Math.min(Math.max(x / rect.width, 0), 1);
         setCurrentTime(percent * audio.duration);
     };
-
-    const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            const delta = e.deltaY * -0.01;
-            setZoom(prev => Math.min(Math.max(prev + delta, 1), 10));
-        }
-    };
-
-    const [isDragging, setIsDragging] = useState(false);
     const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
         if (isDragging) handleSeek(e);
     };
@@ -250,6 +287,15 @@ export default function Timeline() {
                     >
                         Grid {showGrid ? 'ON' : 'OFF'}
                     </button>
+
+                    {/* Auto-Scroll Toggle */}
+                    <button
+                        onClick={() => setAutoScroll(prev => !prev)}
+                        title={autoScroll ? "Disable Auto-Follow" : "Enable Auto-Follow"}
+                        className={`ml-2 px-2 py-1 text-[10px] rounded border transition-all ${autoScroll ? 'bg-primary/20 border-primary text-primary' : 'bg-transparent border-[#444] text-[#666]'}`}
+                    >
+                        Follow {autoScroll ? 'ON' : 'OFF'}
+                    </button>
                 </div>
                 <div className="font-mono text-lg text-blue-400">
                     {formatTime(currentTime)}
@@ -294,9 +340,10 @@ export default function Timeline() {
                                             "absolute top-0 bottom-0 border border-black/20 overflow-hidden flex items-center px-2",
                                             "shadow-sm transition-opacity hover:opacity-90",
                                             // Specific Premiere-like colors
-                                            idx % 3 === 0 ? "bg-[#6d9eeb]" :     // Blue
-                                                idx % 3 === 1 ? "bg-[#e06666]" :     // Red/Pink
-                                                    "bg-[#ffd966]"                       // Yellow
+                                            clip.type === 'image' ? "bg-purple-400" : // Image = Purple
+                                                idx % 3 === 0 ? "bg-[#6d9eeb]" :     // Blue
+                                                    idx % 3 === 1 ? "bg-[#e06666]" :     // Red/Pink
+                                                        "bg-[#ffd966]"                       // Yellow
                                         )}
                                         style={{
                                             left: `${(clip.timelineStart / totalDuration) * 100}%`,
@@ -304,7 +351,7 @@ export default function Timeline() {
                                         }}
                                     >
                                         <div className="text-black font-bold text-sm truncate leading-tight">
-                                            V{clip.videoIndex}
+                                            {clip.type === 'image' ? `IMG ${clip.videoIndex}` : `V${clip.videoIndex}`}
                                         </div>
                                         <span className="absolute bottom-1 right-1 text-[9px] text-black/60 font-mono font-bold">
                                             {clip.duration.toFixed(1)}s
@@ -324,7 +371,12 @@ export default function Timeline() {
                             </div>
                         </div>
 
-                        {/* C. Beat Markers (Full Height Overlay) */}
+                        {/* C. Rhythm Track Area */}
+                        <div className="absolute top-[150px] left-0 right-0 h-[40px] z-10">
+                            <RhythmTrack zoom={zoom} />
+                        </div>
+
+                        {/* D. Beat Markers (Full Height Overlay) */}
                         {showGrid && audio.beats && audio.beats.map((beat, i) => (
                             <div
                                 key={i}

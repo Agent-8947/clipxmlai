@@ -1,4 +1,4 @@
-import { VideoClip, AudioTrack, SyncSettings } from "@/store/useStore";
+import { MediaClip, AudioTrack, SyncSettings } from "@/store/useStore";
 
 export interface TimelineClip {
     id: string; // Unique ID for the timeline event
@@ -7,6 +7,7 @@ export interface TimelineClip {
     videoName: string;
     videoPath: string;
     file: File;
+    type: 'video' | 'image';
     duration: number; // Clip duration in the timeline
     timelineStart: number;
     timelineEnd: number;
@@ -14,15 +15,35 @@ export interface TimelineClip {
     sourceEnd: number;
 }
 
-export function generateTimeline(videos: VideoClip[], audio: AudioTrack, settings: SyncSettings): TimelineClip[] {
-    if (videos.length === 0 || !audio) return [];
+export function generateTimeline(media: MediaClip[], audio: AudioTrack, settings: SyncSettings): TimelineClip[] {
+    if (media.length === 0 || !audio) return [];
 
     const timeline: TimelineClip[] = [];
-    const beats = audio.beats || [];
+
+    // Use instrument-specific beats if available and relevant
+    let beats = audio.beats || [];
+
+    if (audio.instrumentBeats) {
+        // Map generic algorithms to specific instrument tracks if available
+        if (settings.algorithm === 'drums' && audio.instrumentBeats.kick?.length > 0) {
+            beats = audio.instrumentBeats.kick;
+        } else if (settings.algorithm === 'combo-edm' && audio.instrumentBeats.kick?.length > 0) {
+            beats = audio.instrumentBeats.kick;
+        } else if (settings.algorithm === 'voice' && audio.instrumentBeats.hihat?.length > 0) {
+            // For high freq focus, use hihats if available
+            beats = audio.instrumentBeats.hihat;
+        }
+        // Add more mappings as needed
+    }
+
     const totalDuration = audio.duration || 1;
 
-    // Map videos to their storyboard index (1-based) for easy lookup
-    const videoToIndexMap = new Map(videos.map((v, i) => [v.id, i + 1]));
+    // Map media to their storyboard index (1-based) for easy lookup
+    const mediaToIndexMap = new Map(media.map((v, i) => [v.id, i + 1]));
+
+    // Track used segments to avoid repetition
+    // Key: mediaId, Value: Array of {start, end}
+    const usedMediaSegments = new Map<string, Array<{ start: number, end: number }>>();
 
     // Parameters from Settings
     const MIN_CLIP_DURATION = settings.minDuration; // e.g. 0.5
@@ -44,7 +65,16 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
         // (Usually beats[0] is near 0, but we want to start counting intervals from there)
 
         while (currentBeatIndex < beats.length) {
-            let step = skipEveryN;
+
+            // Determine skip factor for this moment
+            // Check if current beat falls into a specific rhythm segment
+            const currentBeatTime = beats[currentBeatIndex];
+            const activeSegment = settings.rhythmSegments?.find(
+                s => currentBeatTime >= s.startTime && currentBeatTime < s.endTime
+            );
+
+            const currentSkipN = activeSegment ? activeSegment.skipEveryN : skipEveryN;
+            let step = currentSkipN;
 
             // Apply variance to the STEP amount (rhythm variance)
             if (durationVariance > 0) {
@@ -76,9 +106,9 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
             cutPoints.push(totalDuration);
         }
 
-    } else if (settings.videoMode === 'metronome' && (audio.bpm || beats.length > 0)) {
+    } else if (settings.videoMode === 'metronome' && (settings.manualBpm || audio.bpm || beats.length > 0)) {
         // Mode 2: Metronome - steady grid based on BPM
-        const bpm = audio.bpm || 120;
+        const bpm = settings.manualBpm || audio.bpm || 120;
         const beatInterval = 60 / bpm;
         const baseInterval = beatInterval * skipEveryN;
 
@@ -129,34 +159,43 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
 
             if (clipDuration < 0.05) continue; // Skip only extremely tiny gaps (< 50ms)
 
-            // Cycle through videos
-            const selectedVideo = videos[videoIdx % videos.length];
+            // Cycle through media
+            const selectedMedia = media[videoIdx % media.length];
             videoIdx++;
 
             // Select source segment
             let sourceStart = 0;
-            if (selectedVideo.duration > clipDuration) {
-                if (settings.cropMode === 'smart') {
-                    const margin = selectedVideo.duration * 0.05;
-                    const usableDuration = selectedVideo.duration - (margin * 2);
-                    if (usableDuration > clipDuration) {
-                        const rand = (Math.random() + Math.random() + Math.random()) / 3;
-                        const maxPossibleStart = usableDuration - clipDuration;
-                        sourceStart = margin + (rand * maxPossibleStart);
-                    }
-                } else {
-                    const maxStart = selectedVideo.duration - clipDuration;
-                    sourceStart = Math.random() * maxStart;
+
+            if (selectedMedia.type === 'video') {
+                const used = usedMediaSegments.get(selectedMedia.id) || [];
+                let start = findBestSourceRange(selectedMedia.duration, clipDuration, settings.cropMode === 'smart', used);
+
+                if (start === null) {
+                    // Video is saturated, clear usage and retry
+                    usedMediaSegments.set(selectedMedia.id, []);
+                    start = findBestSourceRange(selectedMedia.duration, clipDuration, settings.cropMode === 'smart', []);
                 }
+
+                // If still null (e.g. clip > video), fallback to 0
+                sourceStart = start !== null ? start : 0;
+
+                // Record usage
+                const currentUsed = usedMediaSegments.get(selectedMedia.id) || [];
+                currentUsed.push({ start: sourceStart, end: sourceStart + clipDuration });
+                usedMediaSegments.set(selectedMedia.id, currentUsed);
+            } else {
+                // Image: Always start at 0
+                sourceStart = 0;
             }
 
             timeline.push({
                 id: crypto.randomUUID(),
-                videoId: selectedVideo.id,
-                videoIndex: videoToIndexMap.get(selectedVideo.id) || 0,
-                videoName: selectedVideo.name,
-                file: selectedVideo.file,
-                videoPath: `file://${selectedVideo.name}`,
+                videoId: selectedMedia.id,
+                videoIndex: mediaToIndexMap.get(selectedMedia.id) || 0,
+                videoName: selectedMedia.name,
+                file: selectedMedia.file,
+                type: selectedMedia.type,
+                videoPath: `file://${selectedMedia.name}`,
                 duration: clipDuration,
                 timelineStart: clipStart,
                 timelineEnd: clipEnd,
@@ -171,7 +210,7 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
 
     // ========== LEGACY MODES (sequential-once, random-loop) ==========
     let currentTime = 0;
-    let nextVideoIdx = 0; // for sequential mode
+    let nextMediaIdx = 0; // for sequential mode
 
     while (currentTime < totalDuration) {
         // 1. Determine Clip Duration
@@ -217,63 +256,58 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
 
         const clipDuration = nextCutTime - currentTime;
 
-        // 2. Select Video based on Mode
-        let selectedVideo: VideoClip;
+        // 2. Select Media based on Mode
+        let selectedMedia: MediaClip;
 
         if (settings.videoMode === 'sequential-once') {
-            if (nextVideoIdx >= videos.length) {
-                // Stop generating if we run out of videos in one-pass mode
+            if (nextMediaIdx >= media.length) {
+                // Stop generating if we run out of media in one-pass mode
                 break;
             }
-            selectedVideo = videos[nextVideoIdx];
-            nextVideoIdx++;
+            selectedMedia = media[nextMediaIdx];
+            nextMediaIdx++;
         } else {
             // 'random-loop' (or fallback): Pick randomly from all available
-            selectedVideo = videos[Math.floor(Math.random() * videos.length)];
+            selectedMedia = media[Math.floor(Math.random() * media.length)];
 
-            // Optional: Avoid immediate repeat if more than 1 video
-            if (videos.length > 1 && timeline.length > 0 && timeline[timeline.length - 1].videoId === selectedVideo.id) {
-                const otherVideos = videos.filter(v => v.id !== selectedVideo.id);
-                selectedVideo = otherVideos[Math.floor(Math.random() * otherVideos.length)];
+            // Optional: Avoid immediate repeat if more than 1 item
+            if (media.length > 1 && timeline.length > 0 && timeline[timeline.length - 1].videoId === selectedMedia.id) {
+                const otherMedia = media.filter(v => v.id !== selectedMedia.id);
+                selectedMedia = otherMedia[Math.floor(Math.random() * otherMedia.length)];
             }
         }
 
         // 3. Select Source Segment
         let sourceStart = 0;
 
-        if (selectedVideo.duration > clipDuration) {
-            if (settings.cropMode === 'smart') {
-                // Smart Crop: Weighted towards the center (Gaussian-like)
-                // Avoid the first and last 5% of the clip to bypass technical "trash"
-                const margin = selectedVideo.duration * 0.05;
-                const usableDuration = selectedVideo.duration - (margin * 2);
+        if (selectedMedia.type === 'video') {
+            const used = usedMediaSegments.get(selectedMedia.id) || [];
+            let start = findBestSourceRange(selectedMedia.duration, clipDuration, settings.cropMode === 'smart', used);
 
-                if (usableDuration > clipDuration) {
-                    // Pick a "center of gravity" for the clip
-                    // Summing 3 random numbers approximates a normal distribution
-                    const rand = (Math.random() + Math.random() + Math.random()) / 3;
-                    const maxPossibleStart = usableDuration - clipDuration;
-                    sourceStart = margin + (rand * maxPossibleStart);
-                } else {
-                    sourceStart = 0;
-                }
-            } else {
-                // Legacy Random Crop: Uniform distribution
-                const maxStart = selectedVideo.duration - clipDuration;
-                sourceStart = Math.random() * maxStart;
+            if (start === null) {
+                // Video is saturated, clear usage and retry
+                usedMediaSegments.set(selectedMedia.id, []);
+                start = findBestSourceRange(selectedMedia.duration, clipDuration, settings.cropMode === 'smart', []);
             }
+
+            sourceStart = start !== null ? start : 0;
+
+            const currentUsed = usedMediaSegments.get(selectedMedia.id) || [];
+            currentUsed.push({ start: sourceStart, end: sourceStart + clipDuration });
+            usedMediaSegments.set(selectedMedia.id, currentUsed);
         } else {
-            // Video is shorter than slot
+            // Image triggers: start at 0
             sourceStart = 0;
         }
 
         timeline.push({
             id: crypto.randomUUID(),
-            videoId: selectedVideo.id,
-            videoIndex: videoToIndexMap.get(selectedVideo.id) || 0,
-            videoName: selectedVideo.name,
-            file: selectedVideo.file,
-            videoPath: `file://${selectedVideo.name}`,
+            videoId: selectedMedia.id,
+            videoIndex: mediaToIndexMap.get(selectedMedia.id) || 0,
+            videoName: selectedMedia.name,
+            file: selectedMedia.file,
+            type: selectedMedia.type,
+            videoPath: `file://${selectedMedia.name}`,
             duration: clipDuration,
             timelineStart: currentTime,
             timelineEnd: nextCutTime,
@@ -292,3 +326,98 @@ export function generateTimeline(videos: VideoClip[], audio: AudioTrack, setting
     return timeline;
 }
 
+
+function findBestSourceRange(
+    mediaDuration: number,
+    clipDuration: number,
+    isSmartCrop: boolean,
+    usedRanges: Array<{ start: number, end: number }>
+): number | null {
+    const margin = mediaDuration * 0.05;
+    const effectiveDuration = mediaDuration - (2 * margin);
+
+    // Fallback if clip is too long for the video (ignore margin)
+    if (effectiveDuration < clipDuration) {
+        if (mediaDuration > clipDuration) return (mediaDuration - clipDuration) / 2;
+        return 0;
+    }
+
+    // Calculate free intervals
+    let free = [{ start: margin, end: mediaDuration - margin }];
+
+    // Sort used ranges by start
+    const sortedUsed = [...usedRanges].sort((a, b) => a.start - b.start);
+
+    for (const u of sortedUsed) {
+        const nextFree: Array<{ start: number, end: number }> = [];
+        for (const f of free) {
+            // Subtract u from f
+            // If u is completely outside f, keep f
+            if (u.end <= f.start + 0.01 || u.start >= f.end - 0.01) {
+                nextFree.push(f);
+                continue;
+            }
+
+            // If overlap, split f
+            if (u.start > f.start) {
+                nextFree.push({ start: f.start, end: u.start });
+            }
+            if (u.end < f.end) {
+                nextFree.push({ start: u.end, end: f.end });
+            }
+        }
+        free = nextFree;
+    }
+
+    // Filter for valid size
+    const valid = free.filter(f => (f.end - f.start) >= clipDuration);
+
+    if (valid.length === 0) return null; // Saturated
+
+    // Pick a range
+    // Heuristic: weighted purely by length to be fair
+    const totalLength = valid.reduce((acc, f) => acc + (f.end - f.start), 0);
+    let r = Math.random() * totalLength;
+    let selectedRange = valid[0];
+
+    for (const f of valid) {
+        const len = f.end - f.start;
+        if (r <= len) {
+            selectedRange = f;
+            break;
+        }
+        r -= len;
+    }
+
+    // Now pick start within selectedRange
+    const maxLocalStart = (selectedRange.end - selectedRange.start) - clipDuration;
+
+    // Crop Modes Logic
+    if (typeof isSmartCrop === 'string') {
+        const mode = isSmartCrop as string;
+        switch (mode) {
+            case 'center':
+                return selectedRange.start + (maxLocalStart / 2);
+            case 'start':
+                return selectedRange.start; // Begining of valid slot
+            case 'end':
+                return selectedRange.start + maxLocalStart; // End of valid slot
+            case 'golden':
+                // Golden Ratio (approx 0.618 or 0.382)
+                return selectedRange.start + (maxLocalStart * 0.382);
+            case 'smart':
+            default:
+                // Gaussian-ish within the available slot
+                const rand = (Math.random() + Math.random()) / 2;
+                return selectedRange.start + (rand * maxLocalStart);
+        }
+    }
+
+    // Fallback for legacy boolean calls if any (though we updated types)
+    if (isSmartCrop === true) { // smart legacy
+        const rand = (Math.random() + Math.random()) / 2;
+        return selectedRange.start + (rand * maxLocalStart);
+    } else { // random legacy
+        return selectedRange.start + (Math.random() * maxLocalStart);
+    }
+}

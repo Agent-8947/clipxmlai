@@ -17,11 +17,11 @@ import {
     useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useStore, VideoClip } from '@/store/useStore';
-import { GripVertical } from 'lucide-react';
+import { useStore, MediaClip } from '@/store/useStore';
+import { GripVertical, Image as ImageIcon, Video } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 
-function SortableItem({ clip, index }: { clip: VideoClip; index: number }) {
+function SortableItem({ clip, index }: { clip: MediaClip; index: number }) {
     const {
         attributes,
         listeners,
@@ -50,10 +50,10 @@ function SortableItem({ clip, index }: { clip: VideoClip; index: number }) {
             <div className="aspect-video w-full bg-black relative">
                 <img src={clip.thumbnail} alt={clip.name} className="w-full h-full object-cover" />
                 <div className="absolute top-2 right-2 bg-black/70 text-white text-xs px-1 rounded">
-                    {clip.duration.toFixed(1)}s
+                    {clip.type === 'video' ? `${clip.duration.toFixed(1)}s` : 'IMG'}
                 </div>
-                <div className="absolute top-2 left-2 bg-primary/80 text-black text-xs px-1 rounded font-bold">
-                    #{index + 1}
+                <div className="absolute top-2 left-2 bg-primary/80 text-black text-xs px-1 rounded font-bold flex items-center gap-1">
+                    {clip.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <Video className="w-3 h-3" />} #{index + 1}
                 </div>
 
                 {/* Drag Handle Overlay */}
@@ -68,15 +68,14 @@ function SortableItem({ clip, index }: { clip: VideoClip; index: number }) {
 
             {/* Info */}
             <div className="p-2 text-xs font-bold text-white bg-black/40 flex justify-between items-center">
-                <span>Video #{index + 1}</span>
-                <span className="text-[10px] text-muted font-normal">{clip.duration.toFixed(1)}s</span>
+                <span className="truncate max-w-[80px]">{clip.name}</span>
             </div>
         </div>
     );
 }
 
 export default function Storyboard() {
-    const { videos, reorderVideos } = useStore();
+    const { media, reorderMedia } = useStore();
 
     const sensors = useSensors(
         useSensor(PointerSensor),
@@ -89,19 +88,19 @@ export default function Storyboard() {
         const { active, over } = event;
 
         if (over && active.id !== over.id) {
-            const oldIndex = videos.findIndex((v) => v.id === active.id);
-            const newIndex = videos.findIndex((v) => v.id === over.id);
-            reorderVideos(oldIndex, newIndex);
+            const oldIndex = media.findIndex((v) => v.id === active.id);
+            const newIndex = media.findIndex((v) => v.id === over.id);
+            reorderMedia(oldIndex, newIndex);
         }
     };
 
-    if (videos.length === 0) return null;
+    if (media.length === 0) return null;
 
     return (
         <div className="mt-8">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold flex items-center gap-2">
-                    Storyboard <span className="text-sm font-normal text-muted">({videos.length} clips)</span>
+                    Storyboard <span className="text-sm font-normal text-muted">({media.length} items)</span>
                 </h2>
             </div>
 
@@ -111,11 +110,11 @@ export default function Storyboard() {
                 onDragEnd={handleDragEnd}
             >
                 <SortableContext
-                    items={videos.map(v => v.id)}
+                    items={media.map(v => v.id)}
                     strategy={rectSortingStrategy}
                 >
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {videos.map((clip, index) => (
+                        {media.map((clip, index) => (
                             <SortableItem key={clip.id} clip={clip} index={index} />
                         ))}
                     </div>

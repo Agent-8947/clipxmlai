@@ -16,15 +16,21 @@ export function generateXML(timeline: TimelineClip[], audio: AudioTrack, _titleT
     const fps = 30;
     const totalFrames = Math.ceil(audio.duration * fps);
 
-    // Build video clips XML
+    // Build media clips XML (Video & Images)
     const videoClipsXml = timeline.map((clip, index) => {
         const start = Math.round(clip.timelineStart * fps);
         const end = Math.round(clip.timelineEnd * fps);
+        // For images, sourceStart/End are handled, usually 0 to duration
         const inFrame = Math.round(clip.sourceStart * fps);
         const outFrame = Math.round(clip.sourceEnd * fps);
         const clipDuration = end - start;
-        const fileId = `file-video-${index}`;
+        // Use generic file id
+        const fileId = `file-media-${index}`;
         const clipName = escapeXml(clip.videoName);
+        // Note: clip.videoName comes from media.name
+
+        // Determine correct path URL format - ensure localhost is prefixed if needed
+        const fileUrl = `file://localhost/${encodeURIComponent(clip.videoName)}`;
 
         return `            <clipitem id="clipitem-${index}">
                 <name>${clipName}</name>
@@ -39,7 +45,7 @@ export function generateXML(timeline: TimelineClip[], audio: AudioTrack, _titleT
                 <out>${outFrame}</out>
                 <file id="${fileId}">
                     <name>${clipName}</name>
-                    <pathurl>file://localhost/${encodeURIComponent(clip.videoName)}</pathurl>
+                    <pathurl>${fileUrl}</pathurl>
                     <rate>
                         <timebase>${fps}</timebase>
                         <ntsc>FALSE</ntsc>
